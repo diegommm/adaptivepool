@@ -2,20 +2,14 @@ package adaptivepool
 
 import "math"
 
-type Stats = stats1
-
-// stats1 is generally better than stats0. It is also an implementation of
-// Welford's algorithm but with a revision to reduce computing error, originally
-// presented by Knuth's Art of Computer Programming. This is the fastest
-// alternative among those who provide the best accuracy.
-// Source:
-//
-//	https://www.johndcook.com/blog/standard_deviation/
-type stats1 struct {
+// Stats efficiently computes a set of statistical values of numbers pushed to
+// it, with high precision, and without the need to store all the values.
+type Stats struct {
 	n, oldM, newM, oldS, newS float64
 }
 
-func (s *stats1) Push(v float64) {
+// Push adds a new value to the sample.
+func (s *Stats) Push(v float64) {
 	s.n++
 	if s.n > 1 {
 		s.newM = s.oldM + (v-s.oldM)/s.n
@@ -29,13 +23,20 @@ func (s *stats1) Push(v float64) {
 	}
 }
 
-func (s *stats1) Reset() { *s = stats1{} }
+// Reset clears all the data.
+func (s *Stats) Reset() { *s = Stats{} }
 
-func (s *stats1) Mean() float64 { return s.newM }
+// N returns the number of pushed values.
+func (s *Stats) N() float64 { return s.n }
 
-func (s *stats1) StdDev() float64 {
+// Mean returns the arithmetic mean of the pushed values.
+func (s *Stats) Mean() float64 { return s.newM }
+
+// StdDev returns the (population) Standard Deviation of the pushed values. If
+// less than 2 values were pushed, then NaN is returned.
+func (s *Stats) StdDev() float64 {
 	if s.n > 1 {
-		return math.Sqrt(s.newS / (s.n - 1))
+		return math.Sqrt(s.newS / s.n)
 	}
-	return 0
+	return math.NaN()
 }
