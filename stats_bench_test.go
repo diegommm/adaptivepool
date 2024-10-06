@@ -1,31 +1,31 @@
 package adaptivepool
 
-import (
-	"testing"
-)
+import "testing"
 
-func BenchmarkStats0(b *testing.B) {
-	benchStats(b, new(stats0))
-}
-
-func BenchmarkStats1(b *testing.B) {
-	benchStats(b, new(stats1))
-}
-
-func BenchmarkStats2(b *testing.B) {
-	benchStats(b, new(stats2))
-}
-
-func benchStats(b *testing.B, st stats) {
-	b.Helper()
-
+func BenchmarkStats(b *testing.B) {
 	values := allTestDataInputValues(b)
-	b.ReportAllocs()
-	b.ResetTimer()
+	b.Run("implem=stats0", benchStats(new(stats0), values))
+	b.Run("implem=stats1", benchStats(new(stats1), values))
+	b.Run("implem=stats2", benchStats(new(stats2), values))
+}
 
-	for i := 0; i < b.N; i++ {
-		for _, v := range values {
-			st.Push(v)
+func benchStats(st stats, values []float64) func(b *testing.B) {
+	lower := func(a, b float64) float64 {
+		if a < b {
+			return a
+		}
+		return b
+	}
+	var witness float64 // prevent the compiler from being too smart
+
+	return func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			for _, v := range values {
+				st.Push(v)
+				witness = lower(witness, st.N())
+				witness = lower(witness, st.Mean())
+				witness = lower(witness, st.StdDev())
+			}
 		}
 	}
 }

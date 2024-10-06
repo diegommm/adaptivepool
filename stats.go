@@ -40,3 +40,11 @@ func (s *Stats) StdDev() float64 {
 	}
 	return math.NaN()
 }
+
+type stats interface {
+	Push(float64)
+	Reset()
+	N() float64
+	Mean() float64
+	StdDev() float64
+}
