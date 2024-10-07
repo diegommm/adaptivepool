@@ -44,16 +44,15 @@ func zero(tb testing.TB, v any) {
 	}
 }
 
-func parseFloats(ss []string) ([]float64, error) {
-	ret := make([]float64, 0, len(ss))
+func parseFloats(ss []string, ret []float64) error {
 	for i, s := range ss {
 		f, err := strconv.ParseFloat(s, 64)
 		if err != nil {
-			return nil, fmt.Errorf("parse %d-eth float: %w", i, err)
+			return fmt.Errorf("parse %d-eth float: %w", i, err)
 		}
-		ret = append(ret, f)
+		ret[i] = f
 	}
-	return ret, nil
+	return nil
 }
 
 func csvTestDataReader(tb testing.TB) *csv.Reader {

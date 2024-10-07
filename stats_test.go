@@ -183,6 +183,7 @@ func testStats(t *testing.T, st stats, meanErrOK, sdErrOK errTestFunc) {
 	equal(t, true, math.IsNaN(sd), "unexpected non-NaN std dev for"+
 		" non-initialized stats: %v", sd)
 
+	v := make([]float64, 3)
 	for i := 1; ; i++ {
 		rec, err := cr.Read()
 		if errors.Is(err, io.EOF) {
@@ -191,7 +192,7 @@ func testStats(t *testing.T, st stats, meanErrOK, sdErrOK errTestFunc) {
 		zero(t, err)
 		equal(t, 3, len(rec), "number of CSV values in record #%d", i)
 
-		v, err := parseFloats(rec)
+		err = parseFloats(rec, v)
 		zero(t, err)
 
 		st.Push(v[0])

@@ -27,3 +27,6 @@ go.work.sum
 # [neo]vi[m]
 *.swp
 *.swo
+
+# custom HTML Go coverage
+cover.html
