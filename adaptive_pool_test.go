@@ -23,30 +23,30 @@ func TestAdaptivePool(t *testing.T) {
 
 		x := newAdaptivePoolAsserter(t, NormalSlice[int]{thresh}, capv)
 		x.assertStats(0, 0, math.NaN())
-		x.assertAcquire(0)
-		x.assertAcquire(0)           // should not change capacity
-		x.assertRelease(v(10), true) // n=1 ; mean=10   ; stdDev=NaN
+		x.assertGet(0)
+		x.assertGet(0)            // should not change capacity
+		x.assertPut(v(10), false) // n=1 ; mean=10   ; stdDev=NaN
 		x.assertStats(1, 10, math.NaN())
-		x.assertAcquire(10)
-		x.assertAcquire(10)           // should not change capacity
-		x.assertRelease(v(10), false) // n=2 ; mean=10   ; stdDev=0
-		x.assertRelease(v(10), false) // n=3 ; mean=10   ; stdDev=0
-		x.assertRelease(v(20), true)  // n=4 ; mean=12.5 ; stdDev=4.3
-		x.assertRelease(v(20), true)  // n=5 ; mean=14   ; stdDev=4.8
-		x.assertRelease(v(20), false) // n=6 ; mean=15   ; stdDev=5
-		x.assertAcquire(20)
-		x.assertAcquire(20)          // should not change capacity
-		x.assertRelease(v(30), true) // n=7 ; mean=17.1 ; stdDev=6.9
-		x.assertRelease(v(30), true) // n=8 ; mean=18.7 ; stdDev=7.8
-		x.assertRelease(v(30), true) // n=9 ; mean=20   ; stdDev=8.1
-		x.assertRelease(v(50), true) // n=10; mean=23   ; stdDev=11.8
-		x.assertRelease(v(50), true) // n=11; mean=25.4 ; stdDev=13.7
-		x.assertRelease(v(50), true) // n=12; mean=27.5 ; stdDev=14.7
-		x.assertRelease(v(50), true) // n=13; mean=29.3 ; stdDev=15.4
-		x.assertRelease(v(50), true) // n=14; mean=30.7 ; stdDev=15.7
-		x.assertRelease(v(50), true) // n=15; mean=32   ; stdDev=16
-		x.assertAcquire(48)
-		x.assertAcquire(48) // should not change capacity
+		x.assertGet(10)
+		x.assertGet(10)           // should not change capacity
+		x.assertPut(v(10), false) // n=2 ; mean=10   ; stdDev=0
+		x.assertPut(v(10), false) // n=3 ; mean=10   ; stdDev=0
+		x.assertPut(v(20), true)  // n=4 ; mean=12.5 ; stdDev=4.3
+		x.assertPut(v(20), true)  // n=5 ; mean=14   ; stdDev=4.8
+		x.assertPut(v(20), false) // n=6 ; mean=15   ; stdDev=5
+		x.assertGet(20)
+		x.assertGet(20)          // should not change capacity
+		x.assertPut(v(30), true) // n=7 ; mean=17.1 ; stdDev=6.9
+		x.assertPut(v(30), true) // n=8 ; mean=18.7 ; stdDev=7.8
+		x.assertPut(v(30), true) // n=9 ; mean=20   ; stdDev=8.1
+		x.assertPut(v(50), true) // n=10; mean=23   ; stdDev=11.8
+		x.assertPut(v(50), true) // n=11; mean=25.4 ; stdDev=13.7
+		x.assertPut(v(50), true) // n=12; mean=27.5 ; stdDev=14.7
+		x.assertPut(v(50), true) // n=13; mean=29.3 ; stdDev=15.4
+		x.assertPut(v(50), true) // n=14; mean=30.7 ; stdDev=15.7
+		x.assertPut(v(50), true) // n=15; mean=32   ; stdDev=16
+		x.assertGet(48)
+		x.assertGet(48) // should not change capacity
 
 		// we have added enough cherry-picked values so that stats will likely
 		// be very precise already, even if the Stats implementation is not very
@@ -65,7 +65,7 @@ func TestAdaptivePool(t *testing.T) {
 		}
 
 		x := newAdaptivePoolAsserter(t, NormalBytesBuffer{thresh}, capv)
-		x.assertAcquire(0)
+		x.assertGet(0)
 
 		values := make([]float64, 3)
 		cr := csvTestDataReader(t)
@@ -82,13 +82,13 @@ func TestAdaptivePool(t *testing.T) {
 			err = parseFloats(rec, values)
 			zero(t, err)
 
-			x.ap.Release(v(int(values[0])))
+			x.ap.Put(v(int(values[0])))
 		}
 		x.assertStats(i, values[1], values[2])
 		expectedSize := normalCreateSize(i, values[1], values[2], thresh)
-		x.assertAcquire(float64(int(expectedSize)))
+		x.assertGet(float64(int(expectedSize)))
 
-		x.ap.Release(nil) // should not panic
+		x.ap.Put(nil) // should not panic
 	})
 }
 
@@ -118,30 +118,30 @@ func newAdaptivePoolAsserter[T any](
 	}
 }
 
-func (a adaptivePoolAsserter[T]) assertAcquire(expectedSize float64) {
+func (a adaptivePoolAsserter[T]) assertGet(expectedSize float64) {
 	a.t.Helper()
-	item := a.ap.Acquire()
+	item := a.ap.Get()
 	if s := a.provider.Sizeof(item); s != 0 {
-		a.t.Fatalf("acquired items should have size zero, got %v", s)
+		a.t.Fatalf("created items should have size zero, got %v", s)
 	}
 	got := a.capv(item)
 	if got != expectedSize {
-		a.t.Fatalf("expected to acquire item with size %v, got %v",
+		a.t.Fatalf("expected item with size %v, got %v",
 			expectedSize, got)
 	}
 }
 
-func (a adaptivePoolAsserter[T]) assertRelease(v T, expectDropped bool) {
+func (a adaptivePoolAsserter[T]) assertPut(v T, expectDropped bool) {
 	a.t.Helper()
 	curCount := a.pool.putCount
-	a.ap.Release(v)
+	a.ap.Put(v)
 	wasDropped := curCount == a.pool.putCount
 	if wasDropped != expectDropped {
 		var expectedStr string
 		if !expectDropped {
 			expectedStr = "not "
 		}
-		a.t.Fatalf("released item was %vexpected to be dropped", expectedStr)
+		a.t.Fatalf("item put was %vexpected to be dropped", expectedStr)
 	}
 }
 
@@ -199,8 +199,8 @@ func TestNormalAccept(t *testing.T) {
 		n, mean, stdDev, thresh, itemSize float64
 		expected                          bool
 	}{
-		{0, 0, math.NaN(), 0, 0, false},
-		{1, 0, math.NaN(), 0, 0, false},
+		{0, 0, math.NaN(), 0, 0, true},
+		{1, 0, math.NaN(), 0, 0, true},
 		{2, 10, 3, 1, 0, false},
 		{2, 10, 3, 1, 10, true},
 		{2, 10, 3, 1, 7, true},

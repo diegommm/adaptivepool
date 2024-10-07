@@ -8,6 +8,14 @@ import (
 	"testing"
 )
 
+type stats interface {
+	Push(float64)
+	Reset()
+	N() float64
+	Mean() float64
+	StdDev() float64
+}
+
 // stats0 is a naive implementation of Welford's algorithm. Source:
 //
 //	https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance

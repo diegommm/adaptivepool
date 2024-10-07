@@ -29,22 +29,14 @@ func (s *Stats) Reset() { *s = Stats{} }
 // N returns the number of pushed values.
 func (s *Stats) N() float64 { return s.n }
 
-// Mean returns the arithmetic mean of the pushed values.
+// Mean returns the Arithmetic Mean of the pushed values.
 func (s *Stats) Mean() float64 { return s.newM }
 
-// StdDev returns the (population) Standard Deviation of the pushed values. If
+// StdDev returns the (Population) Standard Deviation of the pushed values. If
 // less than 2 values were pushed, then NaN is returned.
 func (s *Stats) StdDev() float64 {
 	if s.n > 1 {
 		return math.Sqrt(s.newS / s.n)
 	}
 	return math.NaN()
-}
-
-type stats interface {
-	Push(float64)
-	Reset()
-	N() float64
-	Mean() float64
-	StdDev() float64
 }
