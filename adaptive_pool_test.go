@@ -85,7 +85,11 @@ func TestAdaptivePool(t *testing.T) {
 			x.ap.Put(v(int(values[0])))
 		}
 		x.assertStats(i, values[1], values[2])
-		expectedSize := normalCreateSize(i, values[1], values[2], thresh)
+		sd := values[2]
+		if i < 2 {
+			sd = math.NaN()
+		}
+		expectedSize := normalCreateSize(values[1], sd, thresh)
 		x.assertGet(float64(int(expectedSize)))
 
 		x.ap.Put(nil) // should not panic
@@ -106,7 +110,7 @@ func newAdaptivePoolAsserter[T any](
 	capv func(T) float64,
 ) adaptivePoolAsserter[T] {
 	pool := new(testPool)
-	ap := New[T](p)
+	ap := New[T](p, 0)
 	ap.pool = pool
 	pool.New = ap.new
 	return adaptivePoolAsserter[T]{
@@ -148,7 +152,8 @@ func (a adaptivePoolAsserter[T]) assertPut(v T, expectDropped bool) {
 func (a adaptivePoolAsserter[T]) assertStats(n, mean, stdDev float64) {
 	// NOTE: numbers are round to 1 decimal to simplify tests
 	a.t.Helper()
-	gotN, gotMean, gotStdDev := a.ap.ReadStats()
+	st := a.ap.Stats()
+	gotN, gotMean, gotStdDev := st.N(), st.Mean(), st.StdDev()
 	mean, stdDev = roundOneDecimal(mean), roundOneDecimal(stdDev)
 	gotMean, gotStdDev = roundOneDecimal(gotMean), roundOneDecimal(gotStdDev)
 	if n != gotN || mean != gotMean ||
@@ -185,7 +190,11 @@ func TestNormalCreateSize(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		got := normalCreateSize(tc.n, tc.mean, tc.stdDev, tc.thresh)
+		sd := tc.stdDev
+		if tc.n < 2 {
+			sd = math.NaN()
+		}
+		got := normalCreateSize(tc.mean, sd, tc.thresh)
 		if got != tc.expected {
 			t.Errorf("testCase[%v] unexpected %v, got %v", i, tc.expected, got)
 		}
@@ -210,9 +219,26 @@ func TestNormalAccept(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		got := normalAccept(tc.n, tc.mean, tc.stdDev, tc.thresh, tc.itemSize)
+		sd := tc.stdDev
+		if tc.n < 2 {
+			sd = math.NaN()
+		}
+		got := normalAccept(tc.mean, sd, tc.thresh, tc.itemSize)
 		if got != tc.expected {
 			t.Errorf("testCase[%v] unexpected %v", i, got)
+		}
+	}
+}
+
+func TestEncoding(t *testing.T) {
+	t.Parallel()
+	testCases := []uint64{
+		0, 1<<64 - 1, (1<<32 - 1) << 16, 42<<32 + 42, 1, 1 << 32,
+	}
+	for i, tc := range testCases {
+		got := encodeBits(decodeBits(tc))
+		if got != tc {
+			t.Errorf("[#%d] got %d, want %d", i, got, tc)
 		}
 	}
 }

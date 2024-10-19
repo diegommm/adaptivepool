@@ -1,11 +1,13 @@
 // Package adaptivepool provides a free list based on [sync.Pool] that can
 // stochastically define which items should be reused, based on a measure of
-// choice, called size.
+// choice called size.
 package adaptivepool
 
 import (
 	"bytes"
+	"math"
 	"sync"
+	"sync/atomic"
 )
 
 // PoolItemProvider handles both item type-specific operations as well as the
@@ -19,11 +21,11 @@ type PoolItemProvider[T any] interface {
 	// Create returns a new item. It has a set of basic stats about the
 	// AdaptivePool usage that allows efficient pre-allocation in many common
 	// scenarios.
-	Create(n, mean, stdDev float64) T
+	Create(mean, stdDev float64) T
 	// Accept returns whether an item of the given size should be accepted into
 	// the internal sync.Pool of an AdaptivePool, or otherwise just dropped for
 	// garbage collection.
-	Accept(n, mean, stdDev, itemSize float64) bool
+	Accept(mean, stdDev, itemSize float64) bool
 }
 
 var _ PoolItemProvider[[]int] = NormalSlice[int]{}
@@ -40,15 +42,15 @@ func (p NormalSlice[T]) Sizeof(v []T) float64 {
 }
 
 // Create returns a new slice with length zero and cap `mean + Threshold *
-// stdDev`. If `n` is 1, then cap will be `mean`.
-func (p NormalSlice[T]) Create(n, mean, stdDev float64) []T {
-	return make([]T, 0, int(normalCreateSize(n, mean, stdDev, p.Threshold)))
+// stdDev`, or `mean` if `stdDev` is `NaN`.
+func (p NormalSlice[T]) Create(mean, stdDev float64) []T {
+	return make([]T, 0, int(normalCreateSize(mean, stdDev, p.Threshold)))
 }
 
 // Accept will accept a new item if its length is in the inclusive range `mean ±
-// Threshold * stdDev`. If `n` is 1, then the item is accepted.
-func (p NormalSlice[T]) Accept(n, mean, stdDev, itemSize float64) bool {
-	return normalAccept(n, mean, stdDev, p.Threshold, itemSize)
+// Threshold * stdDev`, or if `stdDev` is `NaN`.
+func (p NormalSlice[T]) Accept(mean, stdDev, itemSize float64) bool {
+	return normalAccept(mean, stdDev, p.Threshold, itemSize)
 }
 
 var _ PoolItemProvider[*bytes.Buffer] = NormalBytesBuffer{}
@@ -68,16 +70,16 @@ func (p NormalBytesBuffer) Sizeof(v *bytes.Buffer) float64 {
 }
 
 // Create returns a new buffer with `Len` zero and `Cap` `mean + Threshold *
-// stdDev`. If `n` is 1, then Cap will be `mean`.
-func (p NormalBytesBuffer) Create(n, mean, stdDev float64) *bytes.Buffer {
-	size := normalCreateSize(n, mean, stdDev, p.Threshold)
+// stdDev`, or `mean` if `stdDev` is `NaN`.
+func (p NormalBytesBuffer) Create(mean, stdDev float64) *bytes.Buffer {
+	size := normalCreateSize(mean, stdDev, p.Threshold)
 	return bytes.NewBuffer(make([]byte, 0, int(size)))
 }
 
 // Accept will accept a new item if its `Len` is in the inclusive range `mean ±
-// Threshold * stdDev`. If `n` is 1, then the item is accepted.
-func (p NormalBytesBuffer) Accept(n, mean, stdDev, itemSize float64) bool {
-	return normalAccept(n, mean, stdDev, p.Threshold, itemSize)
+// Threshold * stdDev`, or if `stdDev` is `NaN`.
+func (p NormalBytesBuffer) Accept(mean, stdDev, itemSize float64) bool {
+	return normalAccept(mean, stdDev, p.Threshold, itemSize)
 }
 
 // AdaptivePool is a [sync.Pool] that uses a [PoolItemProvider] to efficiently
@@ -90,26 +92,32 @@ type AdaptivePool[T any] struct {
 	pool     pool
 	provider PoolItemProvider[T]
 
+	// reading is lock-free, and actually uses 32bit floating points to store
+	// mean and stdDev in a single 64bit atomic value
+	rStats atomic.Uint64
+
 	statsMu sync.RWMutex
 	stats   Stats
 }
 
-// New creates an AdaptivePool using the given PoolItemProvider.
-func New[T any](p PoolItemProvider[T]) *AdaptivePool[T] {
+// New creates an AdaptivePool. See [Stats.SetMaxN] for a description of the
+// `maxN` argument.
+func New[T any](p PoolItemProvider[T], maxN float64) *AdaptivePool[T] {
 	ret := &AdaptivePool[T]{
 		provider: p,
 	}
+	ret.stats.SetMaxN(maxN)
 	ret.pool = &sync.Pool{
 		New: ret.new,
 	}
 	return ret
 }
 
-// ReadStats returns statistics about the size of items that were put in the
-// pool.
-func (p *AdaptivePool[T]) ReadStats() (n, mean, stdDev float64) {
-	st := p.readStats()
-	return st.N(), st.Mean(), st.StdDev()
+// Stats returns a snapshot of the pool statistics.
+func (p *AdaptivePool[T]) Stats() Stats {
+	p.statsMu.Lock()
+	defer p.statsMu.Unlock()
+	return p.stats
 }
 
 // Get returns a new object from the pool, allocating it from the
@@ -122,42 +130,52 @@ func (p *AdaptivePool[T]) Get() T {
 // it back to the pool if [PoolItemProvider.Accept] allows it.
 func (p *AdaptivePool[T]) Put(x T) {
 	s := p.provider.Sizeof(x)
-	st := p.writeThenRead(s)
-	if p.provider.Accept(st.N(), st.Mean(), st.StdDev(), s) {
+	mean, stdDev := p.writeThenRead(s)
+	if p.provider.Accept(mean, stdDev, s) {
 		p.pool.Put(x)
 	}
 }
 
-func (p *AdaptivePool[T]) new() any {
-	return p.provider.Create(p.ReadStats())
-}
-
-func (p *AdaptivePool[T]) readStats() Stats {
-	p.statsMu.RLock()
-	defer p.statsMu.RUnlock()
-	return p.stats
-}
-
-func (p *AdaptivePool[T]) writeThenRead(s float64) Stats {
+func (p *AdaptivePool[T]) writeThenRead(s float64) (mean, stdDev float64) {
 	// this could be changed to a TryLock and return an additional false on lock
-	// failure, in which case the item would also not be put in the pool. This
-	// could help bias towards the read path
+	// failure, in which case the item would also not be put in the pool
 	p.statsMu.Lock()
 	defer p.statsMu.Unlock()
 	p.stats.Push(s)
-	return p.stats
+	mn32, sd32 := float32(p.stats.Mean()), float32(p.stats.StdDev())
+	u64 := encodeBits(mn32, sd32)
+	p.rStats.Store(u64)
+
+	// reduced precision for consistency with the values passed to `Create`
+	return float64(mn32), float64(sd32)
 }
 
-func normalCreateSize(n, mean, stdDev, thresh float64) float64 {
-	if n > 1 {
-		return mean + thresh*stdDev
+func (p *AdaptivePool[T]) new() any {
+	mn32, sd32 := decodeBits(p.rStats.Load())
+	return p.provider.Create(float64(mn32), float64(sd32))
+}
+
+func normalCreateSize(mean, stdDev, thresh float64) float64 {
+	if math.IsNaN(stdDev) {
+		return mean
 	}
-	return mean
+	return mean + thresh*stdDev
 }
 
-func normalAccept(n, mean, stdDev, thresh, itemSize float64) bool {
+func normalAccept(mean, stdDev, thresh, itemSize float64) bool {
 	sdThresh := thresh * stdDev
-	return mean-sdThresh <= itemSize && itemSize <= mean+sdThresh || n < 2
+	return mean-sdThresh <= itemSize && itemSize <= mean+sdThresh ||
+		math.IsNaN(stdDev)
+}
+
+func encodeBits(lo, hi float32) uint64 {
+	return uint64(math.Float32bits(lo)) +
+		uint64(math.Float32bits(hi))<<32
+}
+
+func decodeBits(u64 uint64) (lo, hi float32) {
+	return math.Float32frombits(uint32(u64 & (1<<32 - 1))),
+		math.Float32frombits(uint32(u64 >> 32))
 }
 
 type pool interface {
