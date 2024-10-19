@@ -1,0 +1,76 @@
+# This workflow will build a golang project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
+
+name: Go
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  GO_VERSION: stable
+  GOLANGCI_LINT_VERSION: v1.60
+  LINUX_OS: ubuntu-latest
+
+jobs:
+
+  build:
+    name: Build and test
+    runs-on: ${{ env.LINUX_OS }}
+    outputs:
+      cover_profile: ${{ steps.test-coverage.outputs.cover_profile }}
+    steps:
+    
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Build
+      run: go build -race -v ./...
+
+    - name: Test
+      run: go test -race -v -cover -covermode=atomic -coverprofile=coverage.txt ./...
+
+    - name: Output coverage data
+      id: test-coverage
+      run: |
+        {
+          echo "cover_profile<<EndOfCoverProfileData";
+          cat coverage.txt;
+          echo "EndOfCoverProfileData";
+        } >> "${GITHUB_OUTPUT}"
+
+  code_cov:
+    name: Upload test coverage data to codecov.io
+    needs: build
+    runs-on: ${{ env.LINUX_OS }}
+    steps:
+    
+    - name: Upload coverage data
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+  golangci:
+    name: Lint
+    runs-on: ${{ env.LINUX_OS }}
+    steps:
+    
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: ${{ env.GOLANGCI_LINT_VERSION }}
