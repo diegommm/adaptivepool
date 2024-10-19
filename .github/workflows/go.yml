@@ -19,7 +19,7 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     outputs:
-      cover_profile: ${{ steps.test-coverage.outputs.cover_profile }}
+      cover_profile_bz2: ${{ steps.test-coverage.outputs.cover_profile_bz2 }}
     steps:
     
     - name: Checkout code
@@ -40,21 +40,29 @@ jobs:
       id: test-coverage
       run: |
         {
-          echo "cover_profile<<EndOfCoverProfileData";
-          cat coverage.txt;
+          echo "cover_profile_bz2<<EndOfCoverProfileData";
+          bzip2 -9 -c coverage.txt;
           echo "EndOfCoverProfileData";
         } >> "${GITHUB_OUTPUT}"
 
-  code_cov:
+  codecov:
     name: Upload test coverage data to codecov.io
     needs: build
     runs-on: ubuntu-latest
     steps:
+
+    - name: Decompress coverage data
+      run: |
+        cat > coverage.txt.bz2 <<EOF
+        ${{ needs.build.outputs.cover_profile_bz2 }}
+        EOF
+        bunzip2 coverage.txt.bz2
     
     - name: Upload coverage data
       uses: codecov/codecov-action@v4
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+        file: coverage.txt
 
   golangci:
     name: Lint
