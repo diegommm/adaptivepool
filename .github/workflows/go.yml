@@ -31,8 +31,6 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    outputs:
-      cover_profile: ${{ steps.test-coverage.outputs.cover_profile }}
     steps:
     
     - name: Checkout code
@@ -45,29 +43,8 @@ jobs:
 
     - name: Test
       run: go test -race -v -cover -covermode=atomic -coverprofile=coverage.txt ./...
-
-    - name: Output coverage data
-      id: test-coverage
-      run: |
-        {
-          echo "cover_profile<<EndOfCoverProfileData";
-          cat coverage.txt;
-          echo "EndOfCoverProfileData";
-        } >> "${GITHUB_OUTPUT}"
-
-  codecov:
-    name: Upload test coverage data to codecov.io
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-
-    - name: Decompress coverage data
-      run: |
-        cat > coverage.txt <<EOF
-        ${{ needs.test.outputs.cover_profile }}
-        EOF
     
-    - name: Upload coverage data
+    - name: Upload coverage data to codecov.io
       uses: codecov/codecov-action@v4
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
