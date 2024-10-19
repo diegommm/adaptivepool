@@ -1,3 +1,7 @@
+[![GoDoc](https://godoc.org/github.com/diegommm/adaptivepool?status.svg)](https://godoc.org/github.com/diegommm/adaptivepool)
+[![codecov](https://codecov.io/github/diegommm/adaptivepool/graph/badge.svg?token=MT4Z39DA23)](https://codecov.io/github/diegommm/adaptivepool)
+[![Go Report Card](https://goreportcard.com/badge/github.com/diegommm/adaptivepool)](https://goreportcard.com/report/github.com/diegommm/adaptivepool)
+
 # Stochastic free list based on sync.Pool
 
 Package **adaptivepool** provides a free list based on sync.Pool that can
