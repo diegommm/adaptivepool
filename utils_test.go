@@ -17,11 +17,6 @@ import (
 //go:embed stats_test_data.csv.bz2
 var statsTestData []byte
 
-const (
-	testDataGenMean   = 50 * 1024
-	testDataGenStdDev = 512
-)
-
 func msgFmt(msg string, args ...any) string {
 	if msg != "" {
 		msg = fmt.Sprintf(msg+": ", args...)

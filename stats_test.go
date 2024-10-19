@@ -147,10 +147,6 @@ func TestStats12(t *testing.T) {
 // errTestFunc returns whether it passes.
 type errTestFunc = func(n, expected, got float64) bool
 
-func errTestPerfect(n, expected, got float64) bool {
-	return expected == got
-}
-
 func errTestSkip(n, expected, got float64) bool {
 	return true
 }
