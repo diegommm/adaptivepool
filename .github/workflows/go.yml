@@ -12,13 +12,12 @@ on:
 env:
   GO_VERSION: stable
   GOLANGCI_LINT_VERSION: v1.60
-  LINUX_OS: ubuntu-latest
 
 jobs:
 
   build:
     name: Build and test
-    runs-on: ${{ env.LINUX_OS }}
+    runs-on: ubuntu-latest
     outputs:
       cover_profile: ${{ steps.test-coverage.outputs.cover_profile }}
     steps:
@@ -49,7 +48,7 @@ jobs:
   code_cov:
     name: Upload test coverage data to codecov.io
     needs: build
-    runs-on: ${{ env.LINUX_OS }}
+    runs-on: ubuntu-latest
     steps:
     
     - name: Upload coverage data
@@ -59,7 +58,7 @@ jobs:
 
   golangci:
     name: Lint
-    runs-on: ${{ env.LINUX_OS }}
+    runs-on: ubuntu-latest
     steps:
     
     - name: Checkout code
