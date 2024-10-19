@@ -3,6 +3,10 @@ package adaptivepool
 import "testing"
 
 func BenchmarkStats(b *testing.B) {
+	// Consider running this benchmark like this for consistency with previous
+	// commits
+	//	go test -run=- -bench=Stats/implem -count=20 | benchstat -col=/implem -
+
 	values := allTestDataInputValues(b)
 	b.Run("implem=stats0", benchStats(new(stats0), values))
 	b.Run("implem=stats1", benchStats(new(stats1), values))

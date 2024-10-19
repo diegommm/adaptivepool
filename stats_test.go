@@ -1,10 +1,13 @@
 package adaptivepool
 
 import (
-	_ "embed"
+	"cmp"
 	"errors"
+	"fmt"
 	"io"
 	"math"
+	"math/rand/v2"
+	"slices"
 	"testing"
 )
 
@@ -222,4 +225,173 @@ func testStats(t *testing.T, st stats, meanErrOK, sdErrOK errTestFunc) {
 	sd = st.StdDev()
 	equal(t, true, math.IsNaN(sd), "unexpected non-NaN std dev for"+
 		" cleared stats: %v", sd)
+}
+
+func TestStatsMaxN(t *testing.T) {
+	t.Parallel()
+
+	st := new(Stats)
+	zero(t, st.MaxN())
+	st.SetMaxN(0.1)
+	zero(t, st.MaxN())
+	st.SetMaxN(-1)
+	zero(t, st.MaxN())
+
+	st.Push(1)
+	st.Push(1)
+	st.Push(1)
+	st.Push(1)
+
+	st.SetMaxN(1)
+	equal(t, 1, st.MaxN(), "maxN")
+	equal(t, 1, st.N(), "maxN")
+
+	st.SetMaxN(0)
+	st.Push(1)
+	st.Push(1)
+	st.Push(1)
+	st.Push(1)
+
+	equal(t, 0, st.MaxN(), "maxN")
+	equal(t, 5, st.N(), "maxN")
+}
+
+func TestStatsMaxNAdapting(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+	t.Parallel()
+
+	testCases := []struct {
+		// a "stage" is a series of random values that roughly resemble a Normal
+		// Distribution. Each stage has its own, randomized sigma and mu
+
+		stageN     int     // number of values pushed during a stage
+		stageCount int     // number of stages to run
+		maxN       float64 // value for SetMaxN
+	}{
+		{stageN: 1e3, stageCount: 1e2, maxN: 512},
+		{stageN: 1e4, stageCount: 1e2, maxN: 512},
+		{stageN: 1e5, stageCount: 1e2, maxN: 512},
+	}
+
+	for i, tc := range testCases {
+		t.Run(fmt.Sprintf("[%d] stageN=%v; stageCount=%v; maxN=%v", i,
+			tc.stageN, tc.stageCount, tc.maxN),
+			func(t *testing.T) {
+				t.Parallel()
+				testAdaptiveMaxN(t, tc.stageN, tc.stageCount, tc.maxN)
+			},
+		)
+	}
+}
+
+func testAdaptiveMaxN(t *testing.T, stageN, stageCount int, maxN float64) {
+	var withMax, withoutMax Stats
+	withMax.SetMaxN(maxN)
+	if got := withMax.MaxN(); maxN != got {
+		t.Fatalf("expectet %v, got %v", maxN, got)
+	}
+
+	withMaxRelErr := make(muSigmas, 0, stageN*stageCount)
+	withoutMaxRelErr := make(muSigmas, 0, stageN*stageCount)
+
+	for i := 0; i < stageCount; i++ {
+		mu, sigma := rand.Float64(), rand.Float64()
+		for j := 0; j < stageN; j++ {
+			value := math.FMA(rand.NormFloat64(), sigma, mu)
+
+			withMax.Push(value)
+			withMaxRelErr = append(withMaxRelErr, muSigma{
+				mu:    relErrPerc(mu, withMax.Mean()),
+				sigma: relErrPerc(sigma, withMax.StdDev()),
+			})
+
+			withoutMax.Push(value)
+			withoutMaxRelErr = append(withoutMaxRelErr, muSigma{
+				mu:    relErrPerc(mu, withoutMax.Mean()),
+				sigma: relErrPerc(sigma, withoutMax.StdDev()),
+			})
+		}
+	}
+
+	withMaxStatsMu := withMaxRelErr.statsMu()
+	withMaxStatsStdDev := withMaxRelErr.statsStdDev()
+
+	withoutMaxStatsMu := withoutMaxRelErr.statsMu()
+	withoutMaxStatsStdDev := withoutMaxRelErr.statsStdDev()
+
+	if withMaxStatsMu.mean > withoutMaxStatsMu.mean {
+		t.Errorf("mean of percent relative error computing mean is worse "+
+			"in the adaptive max. Adaptive max: %v; Non-Adaptive max: %v",
+			withMaxStatsMu.mean, withoutMaxStatsMu.mean)
+	}
+
+	if withMaxStatsMu.stdDev > withoutMaxStatsMu.stdDev {
+		t.Errorf("stdDev of percent relative error computing mean is worse "+
+			"in the adaptive max. Adaptive max: %v; Non-Adaptive max: %v",
+			withMaxStatsMu.stdDev, withoutMaxStatsMu.stdDev)
+	}
+
+	if withMaxStatsStdDev.mean > withoutMaxStatsStdDev.mean {
+		t.Errorf("mean of percent relative error computing stdDev is worse "+
+			"in the adaptive max. Adaptive max: %v; Non-Adaptive max: %v",
+			withMaxStatsStdDev.mean, withoutMaxStatsStdDev.mean)
+	}
+
+	if withMaxStatsStdDev.stdDev > withoutMaxStatsStdDev.stdDev {
+		t.Errorf("stdDev of percent relative error computing stdDev is worse "+
+			"in the adaptive max. Adaptive max: %v; Non-Adaptive max: %v",
+			withMaxStatsStdDev.stdDev, withoutMaxStatsStdDev.stdDev)
+	}
+}
+
+type muSigma struct {
+	mu, sigma float64
+}
+
+type muSigmaStats struct {
+	mean, stdDev float64
+}
+
+type muSigmas []muSigma
+
+func (ms muSigmas) stats(getVal func(muSigma) float64) muSigmaStats {
+	slices.SortFunc(ms, func(a, b muSigma) int {
+		return cmp.Compare(getVal(a), getVal(b))
+	})
+	var sum float64
+	for i := range ms {
+		if v := getVal(ms[i]); !math.IsNaN(v) {
+			sum += v
+		}
+	}
+	mean := sum / float64(len(ms))
+
+	diff := make([]float64, 0, len(ms))
+	for i := range ms {
+		if v := getVal(ms[i]); !math.IsNaN(v) {
+			diff = append(diff, math.Pow(mean-v, 2))
+		}
+	}
+	slices.Sort(diff)
+
+	var stdDev float64
+	for _, v := range diff {
+		stdDev += v
+	}
+	stdDev = math.Sqrt(stdDev / float64(len(diff)))
+
+	return muSigmaStats{
+		mean:   mean,
+		stdDev: stdDev,
+	}
+}
+
+func (ms muSigmas) statsMu() muSigmaStats {
+	return ms.stats(func(ms muSigma) float64 { return ms.mu })
+}
+
+func (ms muSigmas) statsStdDev() muSigmaStats {
+	return ms.stats(func(ms muSigma) float64 { return ms.sigma })
 }
