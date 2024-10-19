@@ -52,4 +52,4 @@ regular `sync.Pool`.
 The parameter `maxN` could also be named 'adaptation window', and a good rule of
 thumb to choose a starting value is thinking how many observations it would take
 to make a reasonably accurate new estimation of statistical parameters after a
-change in their distribution.
+change in their distribution in your application.
