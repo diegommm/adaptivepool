@@ -32,7 +32,8 @@ Following the example above, if the length of the encoded JSON bodies POSTed
 would increase during an application-specific flow, then the statistics could
 potentially cause a lag in adapting to this change. A fair value for `maxN`
 (which depends on the application) compensates the resistance of statistics of
-large populations, allowing for faster adaptation to changes.
+large populations (e.g. long running programs, like servers or scrappers),
+allowing for faster adaptation to changes.
 
 The implementation decouples both type-specific operations as well as the
 decision on when an item is elligible for reuse with the `PoolItemProvider`
