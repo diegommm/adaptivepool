@@ -1,6 +1,7 @@
 [![GoDoc](https://godoc.org/github.com/diegommm/adaptivepool?status.svg)](https://godoc.org/github.com/diegommm/adaptivepool)
 [![codecov](https://codecov.io/github/diegommm/adaptivepool/graph/badge.svg?token=MT4Z39DA23)](https://codecov.io/github/diegommm/adaptivepool)
 [![Go Report Card](https://goreportcard.com/badge/github.com/diegommm/adaptivepool)](https://goreportcard.com/report/github.com/diegommm/adaptivepool)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2a3bd79d8ed64cb5bd30ffae9e4f0486)](https://app.codacy.com/gh/diegommm/adaptivepool/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
 # Stochastic free list based on sync.Pool
 
