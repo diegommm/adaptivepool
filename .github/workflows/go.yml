@@ -1,6 +1,3 @@
-# This workflow will build a golang project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
-
 name: Go
 
 on:
@@ -16,10 +13,8 @@ env:
 jobs:
 
   build:
-    name: Build and test
+    name: Build
     runs-on: ubuntu-latest
-    outputs:
-      cover_profile_bz2: ${{ steps.test-coverage.outputs.cover_profile_bz2 }}
     steps:
     
     - name: Checkout code
@@ -33,6 +28,21 @@ jobs:
     - name: Build
       run: go build -race -v ./...
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    outputs:
+      cover_profile: ${{ steps.test-coverage.outputs.cover_profile }}
+    steps:
+    
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
     - name: Test
       run: go test -race -v -cover -covermode=atomic -coverprofile=coverage.txt ./...
 
@@ -40,23 +50,22 @@ jobs:
       id: test-coverage
       run: |
         {
-          echo "cover_profile_bz2<<EndOfCoverProfileData";
-          bzip2 -9 -c coverage.txt;
+          echo "cover_profile<<EndOfCoverProfileData";
+          cat coverage.txt;
           echo "EndOfCoverProfileData";
         } >> "${GITHUB_OUTPUT}"
 
   codecov:
     name: Upload test coverage data to codecov.io
-    needs: build
+    needs: test
     runs-on: ubuntu-latest
     steps:
 
     - name: Decompress coverage data
       run: |
-        cat > coverage.txt.bz2 <<EOF
-        ${{ needs.build.outputs.cover_profile_bz2 }}
+        cat > coverage.txt <<EOF
+        ${{ needs.test.outputs.cover_profile }}
         EOF
-        bunzip2 coverage.txt.bz2
     
     - name: Upload coverage data
       uses: codecov/codecov-action@v4
