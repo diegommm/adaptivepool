@@ -81,11 +81,11 @@ func TestAdaptivePool(t *testing.T) {
 				break
 			}
 			i++
-			zero(t, err)
+			zero(t, err, "read CSV record #%d", i)
 			equal(t, 3, len(rec), "number of CSV values in record #%d", i)
 
 			err = parseFloats(rec, values)
-			zero(t, err)
+			zero(t, err, "parse floats from CSV record #%d; record: %v", i, rec)
 
 			x.ap.Put(v(int(values[0])))
 		}
