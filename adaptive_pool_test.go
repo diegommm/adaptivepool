@@ -8,6 +8,11 @@ import (
 	"testing"
 )
 
+var (
+	_ PoolItemProvider[[]byte]        = NormalSlice[byte]{}
+	_ PoolItemProvider[*bytes.Buffer] = NormalBytesBuffer{}
+)
+
 func TestAdaptivePool(t *testing.T) {
 	t.Parallel()
 
