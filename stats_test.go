@@ -19,34 +19,6 @@ type stats interface {
 	StdDev() float64
 }
 
-// stats0 is a naive implementation of Welford's algorithm. Source:
-//
-//	https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
-type stats0 struct {
-	n, mean, m2 float64
-}
-
-func (s *stats0) Reset() { *s = stats0{} }
-
-func (s *stats0) N() float64 { return s.n }
-
-func (s *stats0) Mean() float64 { return s.mean }
-
-func (s *stats0) StdDev() float64 {
-	if s.n > 1 {
-		return math.Sqrt(s.m2 / s.n)
-	}
-	return math.NaN()
-}
-
-func (s *stats0) Push(v float64) {
-	s.n++
-	delta := v - s.mean
-	s.mean += delta / s.n
-	delta2 := v - s.mean
-	s.m2 = delta * delta2
-}
-
 // stats1 is generally better than stats0. It is also an implementation of
 // Welford's algorithm but with a revision to reduce computing error, originally
 // presented by Knuth's Art of Computer Programming. This is the fastest
@@ -88,20 +60,6 @@ func (s *stats2) Push(v float64) {
 	s.m4 += term1*deltaN2*(s.n*s.n-3*s.n+3) + 6*deltaN2*s.m2 - 4*deltaN*s.m3
 	s.m3 += term1*deltaN*(s.n-2) - 3*deltaN*s.m2
 	s.m2 += term1
-}
-
-func TestStats0(t *testing.T) {
-	t.Parallel()
-
-	// Mean appears to have great precision from the start and be constant
-	const meanMaxRelErrPercExp = 12
-
-	// Standard deviation, on the other side, appears to be unusable. This might
-	// be related to an implementation mistake here.
-
-	testStats(t, new(stats0),
-		constMaxRelErrPerc(math.Pow(10, -meanMaxRelErrPercExp)),
-		errTestSkip)
 }
 
 func TestStats12(t *testing.T) {
