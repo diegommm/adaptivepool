@@ -8,9 +8,7 @@ func BenchmarkStats(b *testing.B) {
 	//	go test -run=- -bench=Stats/implem -count=20 | benchstat -col=/implem -
 
 	values := allTestDataInputValues(b)
-	b.Run("implem=stats0", benchStats(new(stats0), values))
-	b.Run("implem=stats1", benchStats(new(stats1), values))
-	b.Run("implem=stats2", benchStats(new(stats2), values))
+	b.Run("implem=default", benchStats(new(Stats), values))
 }
 
 func benchStats(st stats, values []float64) func(b *testing.B) {

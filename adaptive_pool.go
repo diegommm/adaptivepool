@@ -28,8 +28,6 @@ type PoolItemProvider[T any] interface {
 	Accept(mean, stdDev, itemSize float64) bool
 }
 
-var _ PoolItemProvider[[]int] = NormalSlice[int]{}
-
 // NormalSlice is a generic [PoolItemProvider] for slice items, operating under
 // the assumption that their `len` follow a Normal Distribution.
 type NormalSlice[T any] struct {
@@ -52,8 +50,6 @@ func (p NormalSlice[T]) Create(mean, stdDev float64) []T {
 func (p NormalSlice[T]) Accept(mean, stdDev, itemSize float64) bool {
 	return normalAccept(mean, stdDev, p.Threshold, itemSize)
 }
-
-var _ PoolItemProvider[*bytes.Buffer] = NormalBytesBuffer{}
 
 // NormalBytesBuffer is a [PoolItemProvider] for [*bytes.Buffer] items,
 // operating under the assumption that their `Len` follow a Normal Distribution.
@@ -103,14 +99,19 @@ type AdaptivePool[T any] struct {
 // New creates an AdaptivePool. See [Stats.SetMaxN] for a description of the
 // `maxN` argument.
 func New[T any](p PoolItemProvider[T], maxN float64) *AdaptivePool[T] {
-	ret := &AdaptivePool[T]{
-		provider: p,
+	return new(AdaptivePool[T]).init(p, maxN)
+}
+
+func (p *AdaptivePool[T]) init(
+	pp PoolItemProvider[T],
+	maxN float64,
+) *AdaptivePool[T] {
+	p.provider = pp
+	p.stats.SetMaxN(maxN)
+	p.pool = &sync.Pool{
+		New: p.new,
 	}
-	ret.stats.SetMaxN(maxN)
-	ret.pool = &sync.Pool{
-		New: ret.new,
-	}
-	return ret
+	return p
 }
 
 // Stats returns a snapshot of the pool statistics.
