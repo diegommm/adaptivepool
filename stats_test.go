@@ -11,62 +11,45 @@ import (
 	"testing"
 )
 
+// stats allows testing different implementations of Stats. There were
+// originally three of them, and they can be found in the git history. The
+// current implementation was known as `stats1`, and the others were named
+// `stats0` and `stats2. Brief description of the three:
+//
+//   - stats0: was an implementation based on the Welford's online algorithm
+//     taken from the wikipedia on Oct 2024. It was quite fast and relatively
+//     good at keeping up with the Mean, but its StdDev implementation was
+//     certainly broken. Link:
+//     https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+//   - stats1: the current implementation. Based on a C++ example code found on
+//     Oct 2024 in a web page. From the three, it was the fastest to run and
+//     shared the same good precision results as `stats2`. According to the web
+//     page author, it is also an implementation of Welford's algorithm but with
+//     a revision to reduce computing error, originally presented by Knuth's Art
+//     of Computer Programming. `stats1` was later modified to account for
+//     seasonal changes with `SetMaxN`, and a minor reduction on precision loss
+//     added by using math.FMA. Link:
+//     https://www.johndcook.com/blog/standard_deviation/
+//   - stats2: also taken from the same web page as `stats1` in Oct 2024, but
+//     with the ability to also provide skewness and Kurtois, which were a
+//     non-goal for this project. It appeared to have the same precision and
+//     adaptation as `stats1`, though significantly more verbose, and slightly
+//     slower. Link:
+//     https://www.johndcook.com/skewness_kurtosis.html
 type stats interface {
 	Push(float64)
 	Reset()
 	N() float64
+	MaxN() float64
+	SetMaxN(float64)
 	Mean() float64
 	StdDev() float64
 }
 
-// stats1 is generally better than stats0. It is also an implementation of
-// Welford's algorithm but with a revision to reduce computing error, originally
-// presented by Knuth's Art of Computer Programming. This is the fastest
-// alternative among those who provide the best accuracy.
-// Source:
-//
-//	https://www.johndcook.com/blog/standard_deviation/
-type stats1 = Stats
+var _ stats = new(Stats)
 
-// stats2 delivers comparable precision and performance as stats1 but can also
-// return skewness and Kurtosis, at the expense of more code. Source:
-//
-//	https://www.johndcook.com/skewness_kurtosis.html
-type stats2 struct {
-	n, m1, m2, m3, m4 float64
-}
-
-func (s *stats2) Reset() { *s = stats2{} }
-
-func (s *stats2) N() float64 { return s.n }
-
-func (s *stats2) Mean() float64 { return s.m1 }
-
-func (s *stats2) StdDev() float64 {
-	if s.n > 1 {
-		return math.Sqrt(s.m2 / s.n)
-	}
-	return math.NaN()
-}
-
-func (s *stats2) Push(v float64) {
-	n1 := s.n
-	s.n++
-	delta := v - s.m1
-	deltaN := delta / s.n
-	deltaN2 := deltaN * deltaN
-	term1 := delta * deltaN * n1
-	s.m1 += deltaN
-	s.m4 += term1*deltaN2*(s.n*s.n-3*s.n+3) + 6*deltaN2*s.m2 - 4*deltaN*s.m3
-	s.m3 += term1*deltaN*(s.n-2) - 3*deltaN*s.m2
-	s.m2 += term1
-}
-
-func TestStats12(t *testing.T) {
+func TestStats(t *testing.T) {
 	t.Parallel()
-
-	// Stats1 and Stats2 appear to follow comparable (if not the same) precision
-	// models
 
 	// Mean appears to have great precision from the start and be constant
 	const meanMaxRelErrPercExp = 12
@@ -85,29 +68,13 @@ func TestStats12(t *testing.T) {
 		c      = 0
 	)
 
-	t.Run("stats1", func(t *testing.T) {
-		t.Parallel()
-
-		testStats(t, new(stats1),
-			constMaxRelErrPerc(math.Pow(10, -meanMaxRelErrPercExp)),
-			powfRelErrPerc(xShift, a, b, c))
-	})
-
-	t.Run("stats2", func(t *testing.T) {
-		t.Parallel()
-
-		testStats(t, new(stats2),
-			constMaxRelErrPerc(math.Pow(10, -meanMaxRelErrPercExp)),
-			powfRelErrPerc(xShift, a, b, c))
-	})
+	testStats(t, new(Stats),
+		constMaxRelErrPerc(math.Pow(10, -meanMaxRelErrPercExp)),
+		powfRelErrPerc(xShift, a, b, c))
 }
 
 // errTestFunc returns whether it passes.
 type errTestFunc = func(n, expected, got float64) bool
-
-func errTestSkip(n, expected, got float64) bool {
-	return true
-}
 
 func constMaxRelErrPerc(maxRelErrPerc float64) errTestFunc {
 	return func(_, expected, got float64) bool {
