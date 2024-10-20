@@ -61,6 +61,9 @@ func TestStats(t *testing.T) {
 	//	errRelPerc<10 at N=6
 	//	errRelPerc<5  at N=11
 	//	errRelPerc<1  at N=51
+	//
+	// NOTE: this could mean that 100 (or 500 for some comfort, if the
+	// application allows it) would be a reasonable starting value for `maxN`.
 	const (
 		xShift = -1
 		a      = 30

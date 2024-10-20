@@ -40,7 +40,10 @@ func (s *Stats) MaxN() float64 { return math.Round(s.maxN) }
 // incremented beyond `maxN`. This is useful to keep a bias towards latest
 // values, improving the adaptability to seasonal changes in data distribution.
 // Using a value less than one disables this behaviour. If the current value of
-// N is already higher, then it will be set to `maxN` immediately.
+// N is already higher, then it will be set to `maxN` immediately. A value too
+// low may cause too much disturbance, while a value too high may reduce
+// adaptability. A recommended starting value is 500, if your application can
+// tolerate it, and probably no less than 100 otherwise.
 func (s *Stats) SetMaxN(maxN float64) {
 	if maxN < 1 {
 		maxN = 0
