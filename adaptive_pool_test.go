@@ -63,7 +63,7 @@ func TestAdaptivePool(t *testing.T) {
 		x.assertStats(15, 32, 16)
 	})
 
-	t.Run("test data", func(t *testing.T) {
+	t.Run("test data from file", func(t *testing.T) {
 		t.Parallel()
 		const thresh = 2.5
 		v := func(n int) *bytes.Buffer {

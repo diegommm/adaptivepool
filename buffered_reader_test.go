@@ -316,7 +316,8 @@ func finishAndTestBufferedReaderInternal(t *testing.T, br *BufferedReader,
 
 	wantRune, wantInt, wantErr := emptyBytesReader.ReadRune()
 	gotRune, gotInt, gotErr := br.ReadRune()
-	zero(t, compareErrs(wantErr, gotErr), "disagree on ReadRune error after close")
+	zero(t, compareErrs(wantErr, gotErr),
+		"disagree on ReadRune error after close")
 	equal(t, wantInt, gotInt, "disagree on ReadRune int after close")
 	equal(t, wantRune, gotRune, "disagree on ReadRune rune after close")
 

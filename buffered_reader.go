@@ -55,7 +55,8 @@ func (p *ReaderBufferer) ReadCloser(rc io.ReadCloser) (*BufferedReader, error) {
 	return p.buf(rc, rc)
 }
 
-func (p *ReaderBufferer) buf(r io.Reader, c io.Closer) (*BufferedReader, error) {
+func (p *ReaderBufferer) buf(r io.Reader,
+	c io.Closer) (*BufferedReader, error) {
 	buf := p.bufPool.Get()
 	bytesBuf := bytes.NewBuffer(buf)
 	n, readErr := bytesBuf.ReadFrom(r)

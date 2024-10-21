@@ -16,13 +16,13 @@ import (
 type PoolItemProvider[T any] interface {
 	// Sizeof measures the size of an item. This measurement is used to compute
 	// stats that allow efficiently reusing and creating items in an
-	// AdaptivePool. Items for which this item returns a negative number will
+	// AdaptivePool. Items for which this method returns a negative number will
 	// not be put back into the pool nor will be fed into statistics. This
 	// allows handling items with a virtual size, like a slice. For instance, a
 	// slice with zero cap should return -1 (or any negative value) so that it's
-	// not unnecessarily put back into the queue, while it is totally fine to
-	// return 0 for a slice with cap greater than zero. It should not hold
-	// references to the item.
+	// not unnecessarily put back into the pool, while it is totally fine to
+	// return 0 for a slice with cap greater than zero. Implementations should
+	// not hold references to the item.
 	Sizeof(T) float64
 	// Create returns a new item. It has a set of basic stats about the
 	// AdaptivePool usage that allows efficient pre-allocation in many common
@@ -140,7 +140,7 @@ func (p *AdaptivePool[T]) Get() T {
 
 // Put updates the internal statistics with the size of the object and puts
 // it back to the pool if [PoolItemProvider.Accept] allows it. Items with a
-// negative size will not be put back into the queue.
+// negative size will not be put back into the pool.
 func (p *AdaptivePool[T]) Put(x T) {
 	s := p.provider.Sizeof(x)
 	if s < 0 {
