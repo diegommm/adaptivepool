@@ -16,7 +16,13 @@ import (
 type PoolItemProvider[T any] interface {
 	// Sizeof measures the size of an item. This measurement is used to compute
 	// stats that allow efficiently reusing and creating items in an
-	// AdaptivePool. It should not hold references to the item.
+	// AdaptivePool. Items for which this method returns a negative number will
+	// not be put back into the pool nor will be fed into statistics. This
+	// allows handling items with a virtual size, like a slice. For instance, a
+	// slice with zero cap should return -1 (or any negative value) so that it's
+	// not unnecessarily put back into the pool, while it is totally fine to
+	// return 0 for a slice with cap greater than zero. Implementations should
+	// not hold references to the item.
 	Sizeof(T) float64
 	// Create returns a new item. It has a set of basic stats about the
 	// AdaptivePool usage that allows efficient pre-allocation in many common
@@ -31,18 +37,24 @@ type PoolItemProvider[T any] interface {
 // NormalSlice is a generic [PoolItemProvider] for slice items, operating under
 // the assumption that their `len` follow a Normal Distribution.
 type NormalSlice[T any] struct {
+	MinCap    int     // Minimum capacity of a newly created slice
 	Threshold float64 // Threshold must be non-negative.
 }
 
 // Sizeof returns the length of the slice.
 func (p NormalSlice[T]) Sizeof(v []T) float64 {
+	if cap(v) == 0 {
+		return -1
+	}
 	return float64(len(v))
 }
 
 // Create returns a new slice with length zero and cap `mean + Threshold *
 // stdDev`, or `mean` if `stdDev` is `NaN`.
 func (p NormalSlice[T]) Create(mean, stdDev float64) []T {
-	return make([]T, 0, int(normalCreateSize(mean, stdDev, p.Threshold)))
+	size := int(normalCreateSize(mean, stdDev, p.Threshold))
+	size = max(size, p.MinCap)
+	return make([]T, 0, size)
 }
 
 // Accept will accept a new item if its length is in the inclusive range `mean ±
@@ -54,13 +66,14 @@ func (p NormalSlice[T]) Accept(mean, stdDev, itemSize float64) bool {
 // NormalBytesBuffer is a [PoolItemProvider] for [*bytes.Buffer] items,
 // operating under the assumption that their `Len` follow a Normal Distribution.
 type NormalBytesBuffer struct {
+	MinCap    int     // Minimum capacity of a newly created *bytes.Buffer
 	Threshold float64 // Threshold must be non-negative.
 }
 
 // Sizeof returns the length of the buffer.
 func (p NormalBytesBuffer) Sizeof(v *bytes.Buffer) float64 {
-	if v == nil {
-		return 0
+	if v == nil || v.Cap() == 0 {
+		return -1
 	}
 	return float64(v.Len())
 }
@@ -68,8 +81,9 @@ func (p NormalBytesBuffer) Sizeof(v *bytes.Buffer) float64 {
 // Create returns a new buffer with `Len` zero and `Cap` `mean + Threshold *
 // stdDev`, or `mean` if `stdDev` is `NaN`.
 func (p NormalBytesBuffer) Create(mean, stdDev float64) *bytes.Buffer {
-	size := normalCreateSize(mean, stdDev, p.Threshold)
-	return bytes.NewBuffer(make([]byte, 0, int(size)))
+	size := int(normalCreateSize(mean, stdDev, p.Threshold))
+	size = max(size, p.MinCap)
+	return bytes.NewBuffer(make([]byte, 0, size))
 }
 
 // Accept will accept a new item if its `Len` is in the inclusive range `mean ±
@@ -80,10 +94,7 @@ func (p NormalBytesBuffer) Accept(mean, stdDev, itemSize float64) bool {
 
 // AdaptivePool is a [sync.Pool] that uses a [PoolItemProvider] to efficiently
 // create and reuse new pool items. Statistics are updated each time the `Put`
-// method is called for an item, regardless if it will be put back in the
-// sync.Pool. As with a regular sync.Pool, it can be "seeded" with objects by
-// calling `Put`, with the additional property that statistics will also be
-// seeded this way.
+// method is called for an item.
 type AdaptivePool[T any] struct {
 	pool     pool
 	provider PoolItemProvider[T]
@@ -128,9 +139,13 @@ func (p *AdaptivePool[T]) Get() T {
 }
 
 // Put updates the internal statistics with the size of the object and puts
-// it back to the pool if [PoolItemProvider.Accept] allows it.
+// it back to the pool if [PoolItemProvider.Accept] allows it. Items with a
+// negative size will not be put back into the pool.
 func (p *AdaptivePool[T]) Put(x T) {
 	s := p.provider.Sizeof(x)
+	if s < 0 {
+		return
+	}
 	mean, stdDev := p.writeThenRead(s)
 	if p.provider.Accept(mean, stdDev, s) {
 		p.pool.Put(x)

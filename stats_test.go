@@ -61,6 +61,9 @@ func TestStats(t *testing.T) {
 	//	errRelPerc<10 at N=6
 	//	errRelPerc<5  at N=11
 	//	errRelPerc<1  at N=51
+	//
+	// NOTE: this could mean that 100 (or 500 for some comfort, if the
+	// application allows it) would be a reasonable starting value for `maxN`.
 	const (
 		xShift = -1
 		a      = 30
@@ -110,7 +113,7 @@ func testStats(t *testing.T, st stats, meanErrOK, sdErrOK errTestFunc) {
 	t.Helper()
 	cr := csvTestDataReader(t)
 
-	zero(t, st.Mean())
+	zero(t, st.Mean(), "Mean in zero value")
 	sd := st.StdDev()
 	equal(t, true, math.IsNaN(sd), "unexpected non-NaN std dev for"+
 		" non-initialized stats: %v", sd)
@@ -121,11 +124,11 @@ func testStats(t *testing.T, st stats, meanErrOK, sdErrOK errTestFunc) {
 		if errors.Is(err, io.EOF) {
 			break
 		}
-		zero(t, err)
+		zero(t, err, "read CSV record #%d", i)
 		equal(t, 3, len(rec), "number of CSV values in record #%d", i)
 
 		err = parseFloats(rec, v)
-		zero(t, err)
+		zero(t, err, "parse floats from CSV record #%d; record: %v", i, rec)
 
 		st.Push(v[0])
 		n := st.N()
@@ -142,7 +145,7 @@ func testStats(t *testing.T, st stats, meanErrOK, sdErrOK errTestFunc) {
 	}
 
 	st.Reset()
-	zero(t, st.Mean())
+	zero(t, st.Mean(), "Mean after Reset")
 	sd = st.StdDev()
 	equal(t, true, math.IsNaN(sd), "unexpected non-NaN std dev for"+
 		" cleared stats: %v", sd)
@@ -152,20 +155,20 @@ func TestStatsMaxN(t *testing.T) {
 	t.Parallel()
 
 	st := new(Stats)
-	zero(t, st.MaxN())
+	zero(t, st.MaxN(), "MaxN in zero value")
 	st.SetMaxN(0.1)
-	zero(t, st.MaxN())
+	zero(t, st.MaxN(), "MaxN should not change if set to number < 1")
 	st.SetMaxN(-1)
-	zero(t, st.MaxN())
+	zero(t, st.MaxN(), "MaxN should not change if set to number < 1")
 
 	st.Push(1)
 	st.Push(1)
 	st.Push(1)
 	st.Push(1)
 
-	st.SetMaxN(1)
-	equal(t, 1, st.MaxN(), "maxN")
-	equal(t, 1, st.N(), "maxN")
+	st.SetMaxN(1.1)
+	equal(t, 1, st.MaxN(), "maxN should be round to nearest integer")
+	equal(t, 1, st.N(), "N should have been capped to maxN")
 
 	st.SetMaxN(0)
 	st.Push(1)

@@ -32,10 +32,10 @@ func equal[T comparable](tb testing.TB, expected, got T, msg string,
 	}
 }
 
-func zero(tb testing.TB, v any) {
+func zero(tb testing.TB, v any, msg string, args ...any) {
 	tb.Helper()
 	if v != nil && !reflect.ValueOf(v).IsZero() {
-		tb.Fatalf("unexpected non-zero value: %v", v)
+		tb.Fatalf("%sunexpected non-zero value: %v", msgFmt(msg, args...), v)
 	}
 }
 
@@ -57,7 +57,7 @@ func csvTestDataReader(tb testing.TB) *csv.Reader {
 	// discard the CSV header
 	for {
 		_, isPrefix, err := r.ReadLine()
-		zero(tb, err)
+		zero(tb, err, "ReadLine from test data")
 		if !isPrefix {
 			break
 		}
@@ -77,15 +77,15 @@ func allTestDataInputValues(tb testing.TB) []float64 {
 	ret := make([]float64, 0, 10_000)
 
 	cr := csvTestDataReader(tb)
-	for {
+	for i := 1; ; i++ {
 		rec, err := cr.Read()
 		if errors.Is(err, io.EOF) {
 			break
 		}
-		zero(tb, err)
+		zero(tb, err, "read CSV record #%d", i)
 
 		f, err := strconv.ParseFloat(rec[0], 64)
-		zero(tb, err)
+		zero(tb, err, "parse first float value from record #%d", i)
 
 		ret = append(ret, f)
 	}

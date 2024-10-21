@@ -26,7 +26,11 @@ func TestAdaptivePool(t *testing.T) {
 			return float64(cap(v))
 		}
 
-		x := newAdaptivePoolAsserter(t, NormalSlice[int]{thresh}, capv)
+		x := newAdaptivePoolAsserter(t, NormalSlice[int]{
+			Threshold: thresh,
+		}, capv)
+		x.assertStats(0, 0, math.NaN())
+		x.assertPut(nil, true) // should be a nop
 		x.assertStats(0, 0, math.NaN())
 		x.assertGet(0)
 		x.assertGet(0)            // should not change capacity
@@ -59,7 +63,7 @@ func TestAdaptivePool(t *testing.T) {
 		x.assertStats(15, 32, 16)
 	})
 
-	t.Run("seeding", func(t *testing.T) {
+	t.Run("test data from file", func(t *testing.T) {
 		t.Parallel()
 		const thresh = 2.5
 		v := func(n int) *bytes.Buffer {
@@ -69,7 +73,12 @@ func TestAdaptivePool(t *testing.T) {
 			return float64(v.Cap())
 		}
 
-		x := newAdaptivePoolAsserter(t, NormalBytesBuffer{thresh}, capv)
+		x := newAdaptivePoolAsserter(t, NormalBytesBuffer{
+			Threshold: thresh,
+		}, capv)
+		x.assertStats(0, 0, math.NaN())
+		x.assertPut(nil, true) // should be a nop
+		x.assertStats(0, 0, math.NaN())
 		x.assertGet(0)
 
 		values := make([]float64, 3)
@@ -81,11 +90,11 @@ func TestAdaptivePool(t *testing.T) {
 				break
 			}
 			i++
-			zero(t, err)
+			zero(t, err, "read CSV record #%d", i)
 			equal(t, 3, len(rec), "number of CSV values in record #%d", i)
 
 			err = parseFloats(rec, values)
-			zero(t, err)
+			zero(t, err, "parse floats from CSV record #%d; record: %v", i, rec)
 
 			x.ap.Put(v(int(values[0])))
 		}
@@ -130,8 +139,8 @@ func newAdaptivePoolAsserter[T any](
 func (a adaptivePoolAsserter[T]) assertGet(expectedSize float64) {
 	a.t.Helper()
 	item := a.ap.Get()
-	if s := a.provider.Sizeof(item); s != 0 {
-		a.t.Fatalf("created items should have size zero, got %v", s)
+	if s := a.provider.Sizeof(item); s > 0 {
+		a.t.Fatalf("created items should have non-positive size, got %v", s)
 	}
 	got := a.capv(item)
 	if got != expectedSize {
