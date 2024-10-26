@@ -101,7 +101,7 @@ func (p *ReaderBufferer) release(buf []byte, rd *bytes.Reader) {
 func (p *ReaderBufferer) put(buf []byte) {
 	if cap(buf) > 0 {
 		clear(buf[:cap(buf)])
-		p.bufPool.Put(buf[:0])
+		p.bufPool.Put(buf)
 	}
 }
 
