@@ -1,6 +1,3 @@
-// Package adaptivepool provides a free list based on [sync.Pool] that can
-// stochastically define which items should be reused, based on a measure of
-// choice called size.
 package adaptivepool
 
 import (
@@ -10,94 +7,127 @@ import (
 	"sync/atomic"
 )
 
-// PoolItemProvider handles both item type-specific operations as well as the
-// policy for determining when to reuse items in an [AdaptivePool].
-// Implementations should correctly handle `stdDev` being NaN when `n` is 1.
-type PoolItemProvider[T any] interface {
-	// Sizeof measures the size of an item. This measurement is used to compute
-	// stats that allow efficiently reusing and creating items in an
-	// AdaptivePool. Items for which this method returns a negative number will
-	// not be put back into the pool nor will be fed into statistics. This
-	// allows handling items with a virtual size, like a slice. For instance, a
-	// slice with zero cap should return -1 (or any negative value) so that it's
-	// not unnecessarily put back into the pool, while it is totally fine to
-	// return 0 for a slice with cap greater than zero. Implementations should
-	// not hold references to the item.
-	Sizeof(T) float64
-	// Create returns a new item. It has a set of basic stats about the
-	// AdaptivePool usage that allows efficient pre-allocation in many common
-	// scenarios.
-	Create(mean, stdDev float64) T
-	// Accept returns whether an item of the given size should be accepted into
+// ItemProvider creates and measures items for an [AdaptivePool].
+type ItemProvider[T any] interface {
+	// Costof measures the cost of an item. Items with cost zero will not be put
+	// back in the pool nor will be fed into statistics.
+	Costof(T) int
+	// New creates a new item with cost zero, but pre-allocated to `prealloc`
+	// cost. If it is not possible to perform this preallocation, it is
+	// acceptable to return an item with a smaller preallocated cost.
+	New(prealloc int) T
+	// Reset clears leftover data from past uses.
+	Reset(T) T
+}
+
+// SliceProvider is a generic [ItemProvider] for slice items.
+type SliceProvider[T any] struct{}
+
+// Costof returns the capacity of the slice.
+func (p SliceProvider[T]) Costof(v []T) int {
+	return cap(v)
+}
+
+// New returns a new slice with `len` zero and `cap` equal to `prealloc`.
+func (p SliceProvider[T]) New(prealloc int) []T {
+	return make([]T, 0, prealloc)
+}
+
+// Reset clears the underlying elements and reslices the item to zero-length.
+func (p SliceProvider[T]) Reset(v []T) []T {
+	if v != nil {
+		clear(v[:cap(v)])
+		v = v[:0]
+	}
+	return v
+}
+
+// BytesBufferProvider is an [ItemProvider] for [*bytes.Buffer] items.
+type BytesBufferProvider struct{}
+
+// Costof returns the capacity of the item, and zero if it's nil.
+func (p BytesBufferProvider) Costof(v *bytes.Buffer) int {
+	if v == nil {
+		return 0
+	}
+	return v.Cap()
+}
+
+// Reset clears the underlying data and returns the buffer after resetting it.
+func (p BytesBufferProvider) Reset(v *bytes.Buffer) *bytes.Buffer {
+	if v != nil {
+		v.Reset()
+		b := v.Bytes()
+		clear(b[:cap(b)])
+	}
+	return v
+}
+
+// New returns a new *bytes.Buffer with `Len` zero and `Cap` equal to
+// `prealloc`.
+func (p BytesBufferProvider) New(prealloc int) *bytes.Buffer {
+	return bytes.NewBuffer(make([]byte, 0, prealloc))
+}
+
+// EstimatorStats provides a set of statistics based on observed item costs put
+// in an [AdaptivePool].
+type EstimatorStats struct {
+	Mean   float64 // Arithmetic Mean
+	StdDev float64 // Population Standard Deviation
+
+	// FIXME: it would be interesting to at least provide N. The current
+	// implementation is lock-free in the read-path at the cost of Mean and
+	// StdDev actually having float32 precision. In order to add more stats, it
+	// would probably require to protect the read-path. That could also give
+	// back their precision to Mean and StdDev. We have this struct so that
+	// future iterations can solve for that independently of the rest of the
+	// code, allowing previous Estimator implementations to keep working.
+}
+
+// Estimator provides opinions for decisions made by an [AdaptivePool].
+// Implementations should correctly handle `stdDev` being NaN.
+type Estimator interface {
+	// Suggest returns a suggested item cost for a new item.
+	Suggest(EstimatorStats) int
+	// Accept returns whether an item of the given cost should be accepted into
 	// the internal sync.Pool of an AdaptivePool, or otherwise just dropped for
 	// garbage collection.
-	Accept(mean, stdDev, itemSize float64) bool
+	Accept(s EstimatorStats, itemCost int) bool
 }
 
-// NormalSlice is a generic [PoolItemProvider] for slice items, operating under
-// the assumption that their `len` follow a Normal Distribution.
-type NormalSlice[T any] struct {
-	MinCap    int     // Minimum capacity of a newly created slice
+// NormalEstimator is an [Estimator] that assumes a Normal Distribution over the
+// item costs put into an [AdaptivePool].
+type NormalEstimator struct {
 	Threshold float64 // Threshold must be non-negative.
+	MinCost   int     // Minimum cost that will be suggested.
 }
 
-// Sizeof returns the length of the slice.
-func (p NormalSlice[T]) Sizeof(v []T) float64 {
-	if cap(v) == 0 {
-		return -1
+// Suggest initially uses `mean ± e.Threshold * stdDev` as an estimation if
+// `stdDev` is not `NaN`, or `mean` otherwise.
+func (e NormalEstimator) Suggest(s EstimatorStats) int {
+	if math.IsNaN(s.StdDev) {
+		return max(e.MinCost, int(math.Round(s.Mean)))
 	}
-	return float64(len(v))
+	return max(e.MinCost, int(math.Round(s.Mean+e.Threshold*s.StdDev)))
 }
 
-// Create returns a new slice with length zero and cap `mean + Threshold *
-// stdDev`, or `mean` if `stdDev` is `NaN`.
-func (p NormalSlice[T]) Create(mean, stdDev float64) []T {
-	size := int(normalCreateSize(mean, stdDev, p.Threshold))
-	size = max(size, p.MinCap)
-	return make([]T, 0, size)
-}
-
-// Accept will accept a new item if its length is in the inclusive range `mean ±
-// Threshold * stdDev`, or if `stdDev` is `NaN`.
-func (p NormalSlice[T]) Accept(mean, stdDev, itemSize float64) bool {
-	return normalAccept(mean, stdDev, p.Threshold, itemSize)
-}
-
-// NormalBytesBuffer is a [PoolItemProvider] for [*bytes.Buffer] items,
-// operating under the assumption that their `Len` follow a Normal Distribution.
-type NormalBytesBuffer struct {
-	MinCap    int     // Minimum capacity of a newly created *bytes.Buffer
-	Threshold float64 // Threshold must be non-negative.
-}
-
-// Sizeof returns the length of the buffer.
-func (p NormalBytesBuffer) Sizeof(v *bytes.Buffer) float64 {
-	if v == nil || v.Cap() == 0 {
-		return -1
+// Accept will return false if `stdDev` is `NaN` or if `itemCost` is in the
+// inclusive range `mean ± e.Threshold * stdDev`.
+func (e NormalEstimator) Accept(s EstimatorStats, itemCost int) bool {
+	if math.IsNaN(s.StdDev) {
+		return true
 	}
-	return float64(v.Len())
+	sz64 := float64(itemCost)
+	sdThresh := e.Threshold * s.StdDev
+	return s.Mean-sdThresh <= sz64 && sz64 <= s.Mean+sdThresh
 }
 
-// Create returns a new buffer with `Len` zero and `Cap` `mean + Threshold *
-// stdDev`, or `mean` if `stdDev` is `NaN`.
-func (p NormalBytesBuffer) Create(mean, stdDev float64) *bytes.Buffer {
-	size := int(normalCreateSize(mean, stdDev, p.Threshold))
-	size = max(size, p.MinCap)
-	return bytes.NewBuffer(make([]byte, 0, size))
-}
-
-// Accept will accept a new item if its `Len` is in the inclusive range `mean ±
-// Threshold * stdDev`, or if `stdDev` is `NaN`.
-func (p NormalBytesBuffer) Accept(mean, stdDev, itemSize float64) bool {
-	return normalAccept(mean, stdDev, p.Threshold, itemSize)
-}
-
-// AdaptivePool is a [sync.Pool] that uses a [PoolItemProvider] to efficiently
-// create and reuse new pool items. Statistics are updated each time the `Put`
-// method is called for an item.
+// AdaptivePool uses an [ItemProvider] to more effectively use an internal
+// [sync.Pool].
 type AdaptivePool[T any] struct {
-	pool     pool
-	provider PoolItemProvider[T]
+	pool      pool
+	provider  ItemProvider[T]
+	estimator Estimator
 
 	// reading is lock-free, and actually uses 32bit floating points to store
 	// mean and stdDev in a single 64bit atomic value
@@ -109,79 +139,81 @@ type AdaptivePool[T any] struct {
 
 // New creates an AdaptivePool. See [Stats.SetMaxN] for a description of the
 // `maxN` argument.
-func New[T any](p PoolItemProvider[T], maxN float64) *AdaptivePool[T] {
-	return new(AdaptivePool[T]).init(p, maxN)
+func New[T any](p ItemProvider[T], e Estimator, maxN float64) *AdaptivePool[T] {
+	return new(AdaptivePool[T]).init(p, e, maxN)
 }
 
 func (p *AdaptivePool[T]) init(
-	pp PoolItemProvider[T],
+	pp ItemProvider[T],
+	e Estimator,
 	maxN float64,
 ) *AdaptivePool[T] {
 	p.provider = pp
+	p.estimator = e
 	p.stats.SetMaxN(maxN)
-	p.pool = &sync.Pool{
-		New: p.new,
-	}
+	p.pool = new(sync.Pool)
 	return p
 }
 
-// Stats returns a snapshot of the pool statistics.
-func (p *AdaptivePool[T]) Stats() Stats {
-	p.statsMu.Lock()
-	defer p.statsMu.Unlock()
-	return p.stats
-}
-
-// Get returns a new object from the pool, allocating it from the
-// PoolItemProvider if needed.
+// Get returns a new object from the pool, allocating it from the ItemProvider
+// if needed.
 func (p *AdaptivePool[T]) Get() T {
-	return p.pool.Get().(T)
+	if v := p.pool.Get(); v != nil {
+		return v.(T)
+	}
+	mn32, sd32 := decodeBits(p.rStats.Load())
+	cost := p.estimator.Suggest(EstimatorStats{
+		Mean:   float64(mn32),
+		StdDev: float64(sd32),
+	})
+	return p.provider.New(cost)
 }
 
-// Put updates the internal statistics with the size of the object and puts
-// it back to the pool if [PoolItemProvider.Accept] allows it. Items with a
-// negative size will not be put back into the pool.
+// GetWithCost returns a new object with the specified cost from the pool,
+// allocating it from the ItemProvider if needed.
+func (p *AdaptivePool[T]) GetWithCost(cost int) T {
+	if v := p.pool.Get(); v != nil {
+		// if the item we got from the pool is smaller than needed, drop it for
+		// garbage collection and instead directly allocate a new one with the
+		// appropriate cost
+		if ret := v.(T); p.provider.Costof(ret) >= cost {
+			return ret
+		}
+	}
+	return p.provider.New(cost)
+}
+
+// Put updates the internal statistics with the cost of the object and puts
+// it back into the pool if [Estimator.Accept] allows it. Items with a
+// non-positive cost are immediately dropped.
 func (p *AdaptivePool[T]) Put(x T) {
-	s := p.provider.Sizeof(x)
-	if s < 0 {
+	p.provider.Reset(x)
+	s := p.provider.Costof(x)
+	if s < 1 {
 		return
 	}
 	mean, stdDev := p.writeThenRead(s)
-	if p.provider.Accept(mean, stdDev, s) {
+	st := EstimatorStats{
+		Mean:   mean,
+		StdDev: stdDev,
+	}
+	if p.estimator.Accept(st, s) {
 		p.pool.Put(x)
 	}
 }
 
-func (p *AdaptivePool[T]) writeThenRead(s float64) (mean, stdDev float64) {
+func (p *AdaptivePool[T]) writeThenRead(s int) (mean, stdDev float64) {
 	// this could be changed to a TryLock and return an additional false on lock
 	// failure, in which case the item would also not be put in the pool
 	p.statsMu.Lock()
 	defer p.statsMu.Unlock()
-	p.stats.Push(s)
+	p.stats.Push(float64(s))
 	mn32, sd32 := float32(p.stats.Mean()), float32(p.stats.StdDev())
 	u64 := encodeBits(mn32, sd32)
 	p.rStats.Store(u64)
 
 	// reduced precision for consistency with the values passed to `Create`
 	return float64(mn32), float64(sd32)
-}
-
-func (p *AdaptivePool[T]) new() any {
-	mn32, sd32 := decodeBits(p.rStats.Load())
-	return p.provider.Create(float64(mn32), float64(sd32))
-}
-
-func normalCreateSize(mean, stdDev, thresh float64) float64 {
-	if math.IsNaN(stdDev) {
-		return mean
-	}
-	return mean + thresh*stdDev
-}
-
-func normalAccept(mean, stdDev, thresh, itemSize float64) bool {
-	sdThresh := thresh * stdDev
-	return mean-sdThresh <= itemSize && itemSize <= mean+sdThresh ||
-		math.IsNaN(stdDev)
 }
 
 func encodeBits(lo, hi float32) uint64 {
