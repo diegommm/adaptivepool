@@ -33,16 +33,32 @@ func newBytesReader() any {
 	return bytes.NewReader(nil)
 }
 
-// Reader buffers the contents of the given io.Reader in a
+// Reader buffers the contents of the given io.Reader in a BufferedReader.
+func (p *ReaderBufferer) Reader(r io.Reader) (*BufferedReader, error) {
+	return p.buf(r, nil, 0)
+}
+
+// ReaderWithSize buffers the contents of the given io.Reader in a
 // BufferedReader. If `sz` is positive, then `sz` bytes will be pre-allocated,
-// otherwise an estimation will be used based on the passed observed values.
-func (p *ReaderBufferer) Reader(r io.Reader, sz int) (*BufferedReader, error) {
+// otherwise an estimation will be used based on the past observed values.
+func (p *ReaderBufferer) ReaderWithSize(r io.Reader,
+	sz int) (*BufferedReader, error) {
 	return p.buf(r, nil, sz)
 }
 
-// ReadCloser is like `Reader` but receives an io.ReadCloser instead. It always
-// calls the argument's `Close` method, and it fails if it returns an error.
-func (p *ReaderBufferer) ReadCloser(rc io.ReadCloser,
+// ReadCloser buffers the contents of the given io.ReadCloser in a
+// BufferedReader. It always calls the argument's `Close` method, and it fails
+// if it returns an error.
+func (p *ReaderBufferer) ReadCloser(rc io.ReadCloser) (*BufferedReader, error) {
+	return p.buf(rc, rc, 0)
+}
+
+// ReadCloserWithSize buffers the contents of the given io.ReadCloser in a
+// BufferedReader. If `sz` is positive, then `sz` bytes will be pre-allocated,
+// otherwise an estimation will be used based on the past observed values. It
+// always calls the argument's `Close` method, and it fails if it returns an
+// error.
+func (p *ReaderBufferer) ReadCloserWithSize(rc io.ReadCloser,
 	sz int) (*BufferedReader, error) {
 	return p.buf(rc, rc, sz)
 }
@@ -53,7 +69,7 @@ func (p *ReaderBufferer) buf(r io.Reader,
 	bytesBuf := bytes.NewBuffer(buf[:0])
 	n, readErr := bytesBuf.ReadFrom(r)
 	if readErr != nil && c == nil {
-		p.put(buf)
+		p.bufPool.Put(buf)
 		return nil, fmt.Errorf("buffer io.Reader: %w; bytes read: %v", readErr,
 			n)
 	}
@@ -62,7 +78,7 @@ func (p *ReaderBufferer) buf(r io.Reader,
 	if c != nil {
 		closeErr := c.Close()
 		if readErr != nil || closeErr != nil {
-			p.put(buf)
+			p.bufPool.Put(buf)
 			return nil, fmt.Errorf("buffer io.ReadCloser: read error: %w; "+
 				"close error: %w; bytes read: %v", readErr, closeErr, n)
 		}
@@ -88,19 +104,7 @@ func (p *ReaderBufferer) getBuf(sz int) []byte {
 func (p *ReaderBufferer) release(buf []byte, rd *bytes.Reader) {
 	rd.Reset(nil)
 	p.rdPool.Put(rd)
-	p.put(buf)
-}
-
-func (p *ReaderBufferer) put(buf []byte) {
-	if cap(buf) > 0 {
-		// many methods are allowed to use extra space as a scratch, and then
-		// the buffer could have been potentially resliced. This means that we
-		// can't trust that the last cap(buf)-len(buf) bytes don't have any
-		// information that could potentially be confidential, thus we need
-		// clear all the underlying array
-		clear(buf[:cap(buf)])
-		p.bufPool.Put(buf)
-	}
+	p.bufPool.Put(buf)
 }
 
 // NOTE: we explicitly do not want to offer io.ReaderAt in BufferedReader

@@ -37,7 +37,7 @@ func TestReaderBufferer(t *testing.T) {
 		t.Parallel()
 		brr := NewReaderBufferer(NormalEstimator{2, 0}, 500)
 
-		br, err := brr.Reader(bytes.NewReader(nil), 0)
+		br, err := brr.Reader(bytes.NewReader(nil))
 		zero(t, err, "Reader error on empty io.Reader")
 		equal(t, true, br != nil, "nil Reader")
 
@@ -57,7 +57,7 @@ func TestReaderBufferer(t *testing.T) {
 		const reqAlloc = 1024
 		brr := NewReaderBufferer(NormalEstimator{2, 0}, 500)
 
-		br, err := brr.Reader(bytes.NewReader(nil), reqAlloc)
+		br, err := brr.ReaderWithSize(bytes.NewReader(nil), reqAlloc)
 		zero(t, err, "Reader error on empty io.Reader")
 		equal(t, true, br != nil, "nil Reader")
 
@@ -76,7 +76,7 @@ func TestReaderBufferer(t *testing.T) {
 		brr := NewReaderBufferer(NormalEstimator{2, 0}, 500)
 
 		rc := io.NopCloser(bytes.NewReader([]byte(testData)))
-		br, err := brr.ReadCloser(rc, 0)
+		br, err := brr.ReadCloser(rc)
 		zero(t, err, "Reader error on non-empty io.Reader")
 		equal(t, true, br != nil, "nil Reader")
 
@@ -94,7 +94,7 @@ func TestReaderBufferer(t *testing.T) {
 		brr := NewReaderBufferer(NormalEstimator{2, 0}, 500)
 
 		rc := io.NopCloser(bytes.NewReader([]byte(testData)))
-		br, err := brr.ReadCloser(rc, reqAlloc)
+		br, err := brr.ReadCloserWithSize(rc, reqAlloc)
 		zero(t, err, "Reader error on non-empty io.Reader")
 		equal(t, true, br != nil, "nil Reader")
 
@@ -109,7 +109,7 @@ func TestReaderBufferer(t *testing.T) {
 		t.Parallel()
 		brr := NewReaderBufferer(NormalEstimator{2, 0}, 500)
 
-		br, err := brr.Reader(iotest.ErrReader(errTest), 0)
+		br, err := brr.Reader(iotest.ErrReader(errTest))
 		equal(t, true, errors.Is(err, errTest), "should have failed reading")
 		zero(t, br, "should return nil on error")
 	})
@@ -119,7 +119,7 @@ func TestReaderBufferer(t *testing.T) {
 		brr := NewReaderBufferer(NormalEstimator{2, 0}, 500)
 
 		rc := io.NopCloser(iotest.ErrReader(errTest))
-		br, err := brr.ReadCloser(rc, 0)
+		br, err := brr.ReadCloser(rc)
 		equal(t, true, errors.Is(err, errTest), "should have failed reading")
 		zero(t, br, "should return nil on error")
 	})
@@ -132,7 +132,7 @@ func TestReaderBufferer(t *testing.T) {
 			Reader: bytes.NewReader(nil),
 			Closer: closerFunc(func() error { return errTest }),
 		}
-		br, err := brr.ReadCloser(rc, 0)
+		br, err := brr.ReadCloser(rc)
 		equal(t, true, errors.Is(err, errTest), "should have failed closing")
 		zero(t, br, "should return nil on error")
 	})
@@ -145,7 +145,7 @@ func TestReaderBufferer(t *testing.T) {
 			Reader: iotest.ErrReader(errTest),
 			Closer: closerFunc(func() error { return errTest2 }),
 		}
-		br, err := brr.ReadCloser(rc, 0)
+		br, err := brr.ReadCloser(rc)
 		equal(t, true, errors.Is(err, errTest), "should have failed reading")
 		equal(t, true, errors.Is(err, errTest2), "should have failed closing")
 		zero(t, br, "should return nil on error")

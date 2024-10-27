@@ -51,7 +51,7 @@ func (p BytesBufferProvider) Sizeof(v *bytes.Buffer) int {
 	return v.Cap()
 }
 
-// Reset clears the underlying data and returns the buffer after restting it.
+// Reset clears the underlying data and returns the buffer after resetting it.
 func (p BytesBufferProvider) Reset(v *bytes.Buffer) *bytes.Buffer {
 	v.Reset()
 	b := v.Bytes()
