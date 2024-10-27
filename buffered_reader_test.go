@@ -88,22 +88,23 @@ func TestReaderBufferer(t *testing.T) {
 		equal(t, 1, st.N(), "should have been put back into the pool")
 	})
 
-	t.Run("ReadCloser: happy path - non-empty, request alloc", func(t *testing.T) {
-		t.Parallel()
-		const reqAlloc = 1024
-		brr := NewReaderBufferer(NormalEstimator{2, 0}, 500)
+	t.Run("ReadCloser: happy path - non-empty, request alloc",
+		func(t *testing.T) {
+			t.Parallel()
+			const reqAlloc = 1024
+			brr := NewReaderBufferer(NormalEstimator{2, 0}, 500)
 
-		rc := io.NopCloser(bytes.NewReader([]byte(testData)))
-		br, err := brr.ReadCloserWithSize(rc, reqAlloc)
-		zero(t, err, "Reader error on non-empty io.Reader")
-		equal(t, true, br != nil, "nil Reader")
+			rc := io.NopCloser(bytes.NewReader([]byte(testData)))
+			br, err := brr.ReadCloserWithSize(rc, reqAlloc)
+			zero(t, err, "Reader error on non-empty io.Reader")
+			equal(t, true, br != nil, "nil Reader")
 
-		b := br.Bytes()
-		equal(t, reqAlloc, cap(b), "unexpected capacity")
+			b := br.Bytes()
+			equal(t, reqAlloc, cap(b), "unexpected capacity")
 
-		st := brr.stats()
-		equal(t, 0, st.N(), "should not have been put back into the pool")
-	})
+			st := brr.stats()
+			equal(t, 0, st.N(), "should not have been put back into the pool")
+		})
 
 	t.Run("Reader: fail reading", func(t *testing.T) {
 		t.Parallel()

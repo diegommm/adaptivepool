@@ -10,15 +10,13 @@ import (
 // ItemProvider creates and measures items for an [AdaptivePool].
 type ItemProvider[T any] interface {
 	// Sizeof measures the size of an item. Items with size zero will not be put
-	// back in the pool nor will be fed into statistics. Implementations should
-	// not hold a reference to the passed item.
+	// back in the pool nor will be fed into statistics.
 	Sizeof(T) int
 	// New creates a new item with size zero, but pre-allocated to `prealloc`
 	// size. If it is not possible to perform this preallocation, it is
 	// acceptable to return an item with a smaller preallocated size.
 	New(prealloc int) T
-	// Reset clears leftover data from past uses. Implementations should not
-	// hold a reference to the passed item.
+	// Reset clears leftover data from past uses.
 	Reset(T) T
 }
 
@@ -30,6 +28,7 @@ func (p SliceProvider[T]) Sizeof(v []T) int {
 	return cap(v)
 }
 
+// New returns a new slice with `len` zero and `cap` equal to `prealloc`.
 func (p SliceProvider[T]) New(prealloc int) []T {
 	return make([]T, 0, prealloc)
 }
@@ -59,6 +58,8 @@ func (p BytesBufferProvider) Reset(v *bytes.Buffer) *bytes.Buffer {
 	return v
 }
 
+// New returns a new *bytes.Buffer with `Len` zero and `Cap` equal to
+// `prealloc`.
 func (p BytesBufferProvider) New(prealloc int) *bytes.Buffer {
 	return bytes.NewBuffer(make([]byte, 0, prealloc))
 }
@@ -181,6 +182,7 @@ func (p *AdaptivePool[T]) GetWithSize(size int) T {
 // it back into the pool if [Estimator.Accept] allows it. Items with a
 // non-positive size are immediately dropped.
 func (p *AdaptivePool[T]) Put(x T) {
+	p.provider.Reset(x)
 	s := p.provider.Sizeof(x)
 	if s < 1 {
 		return
@@ -191,7 +193,6 @@ func (p *AdaptivePool[T]) Put(x T) {
 		StdDev: stdDev,
 	}
 	if p.estimator.Accept(st, s) {
-		p.provider.Reset(x)
 		p.pool.Put(x)
 	}
 }
