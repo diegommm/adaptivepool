@@ -35,8 +35,11 @@ func (p SliceProvider[T]) New(prealloc int) []T {
 
 // Reset clears the underlying elements and reslices the item to zero-length.
 func (p SliceProvider[T]) Reset(v []T) []T {
-	clear(v[:cap(v)])
-	return v[:0]
+	if v != nil {
+		clear(v[:cap(v)])
+		v = v[:0]
+	}
+	return v
 }
 
 // BytesBufferProvider is an [ItemProvider] for [*bytes.Buffer] items.
@@ -52,9 +55,11 @@ func (p BytesBufferProvider) Sizeof(v *bytes.Buffer) int {
 
 // Reset clears the underlying data and returns the buffer after resetting it.
 func (p BytesBufferProvider) Reset(v *bytes.Buffer) *bytes.Buffer {
-	v.Reset()
-	b := v.Bytes()
-	clear(b[:cap(b)])
+	if v != nil {
+		v.Reset()
+		b := v.Bytes()
+		clear(b[:cap(b)])
+	}
 	return v
 }
 
