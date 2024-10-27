@@ -9,14 +9,18 @@ Package **adaptivepool** provides a free list based on sync.Pool that can
 stochastically define which items should be reused, based on a measure of
 choice called size.
 
-Example usage:
+Example usage of AdaptivePool:
 
 ```go
-// pool holds *bytes.Buffer items for reuse. Items considered outliers will be
-// dropped so they are garbage collected. Items in the range Mean ± 2 * StdDev
-// will be put back in the pool to be available for reuse. We will bias towards
-// the latest 500 items observed so as to adapt faster to traffic changes.
-var pool = adaptivepool.New(adaptivepool.NormalBytesBuffer{2}, 500)
+// pool holds *bytes.Buffer items for reuse
+var pool = adaptivepool.New(
+    adaptivepool.BytesBufferProvider{},
+    adaptivepool.NormalEstimator{
+        Threshold: 2, // reuse buffer if its Len is in Mean ± 2 * StdDev
+        MinCap: 512,  // minimum capacity of newly created items
+    },
+    500, // bias towards the latest 500 elements to increase adaptability
+)
 
 func postJSON(url string, jsonBody any) (*http.Response, error) {
     buf := pool.Get()
@@ -28,38 +32,55 @@ func postJSON(url string, jsonBody any) (*http.Response, error) {
 }
 ```
 
+Example usage of `ReaderBufferer`:
+
+```go
+// bufferAndClose is a an http.Handler decorator that ensures that request
+// bodies are read and closed fully as soon as possible. Once `Close` is called
+// on the replaced Body, the internal buffer will be transparently released and
+// could potentially be reused.
+func bufferAndClose(next http.Handler) http.Handler {
+    bodiesPool := adaptivepool.NewReaderBufferer(
+        adaptivepool.NormalEstimator{
+            Threshold: 2, // reuse buffer if its Len is in Mean ± 2 * StdDev
+            MinCap: 512,  // minimum capacity of newly created items
+        },
+        500, // bias towards the latest 500 elements to increase adaptability
+    )
+
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        rc, err := bodiesPool.ReadCloserWithSize(r.Body, int(r.ContentLength))
+        if err != nil {
+            w.WriteHeader(http.StatusInternalServerError)
+            log.Printf("buffer request: %v", err)
+            return
+        }
+        req.Body = rc
+        return next.ServeHTTP(req)
+    })
+}
+```
+
+## AdaptivePool
+
 The API is very similar to that of [sync.Pool], but it uses specific types
 instead of `any`. It uses a basic rolling statistics implementation to keep
 track of the number of items `Put` in the pool, the Mean, and Standard Deviation
 of their measured size. An additional parameter provided during creation,
 `maxN`, allows to increase the adaptability of the system to seasonal changes.
-Following the example above, if the length of the encoded JSON bodies POSTed
-would increase during an application-specific flow, then the statistics could
-potentially cause a lag in adapting to this change. A fair value for `maxN`
-(which depends on the application) compensates the resistance of statistics of
-large populations (e.g. long running programs, like servers or scrappers),
-allowing for faster adaptation to changes.
 
 The implementation decouples both type-specific operations as well as the
-decision on when an item is elligible for reuse with the `PoolItemProvider`
-interface. Two implementations are provided: one for slices of any type and one
-for `*bytes.Buffer`. Both have a similar treatment of the items, considering
-that their length follows a Normal Distribution, and only items in the specified
-number of Standard Deviations away from the Mean will be elligible for reuse.
-All other items are considered outliers and are left for garbage collection,
-which makes a more effective use of the internal `sync.Pool`.
+decision on when an item is elligible for reuse with the `ItemProvider` and
+`Estimator` interfaces. Two implementations for `ItemProvider` are given: a
+generic one for slices and one for `*bytes.Buffer`. Both have a similar
+treatment of the items, clearing all bytes before putting them back into the
+pool. This is to prevent accidentally leaking confidential data into other uses.
+The `NormalEstimator` implementation of `Estimator` will discard items with a
+size outside of the inclusive range `Mean ± Threshold * StdDev`, and newly
+created items will have a preallocated size of `Mean + Threshold * StdDev`, and
+with a minimum size of `MinCap`.
 
-The fact that the measures of Mean and Standard Deviation are permanently
-updated allows the system to adapt to changing conditions. It also removes the
-need to establish hardcoded global limits on when to reuse allocated items in a
-regular `sync.Pool`.
-
-The parameter `maxN` could also be named 'adaptation window', and a good rule of
-thumb to choose a starting value is thinking how many observations it would take
-to make a reasonably accurate new estimation of statistical parameters after a
-change in their distribution in your application.
-
-## Running tests
+## Running tests and benchmarks
 
 For a quick run, try:
 
@@ -71,4 +92,10 @@ For the full suite, which includes testing against randomly generated data, try:
 
 ```shell
 go test -race -cover ./...
+```
+
+To run benchmarks:
+
+```shell
+go test -run=- -count=20 | benchstat -col=/implem -
 ```
