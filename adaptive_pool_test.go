@@ -9,9 +9,15 @@ import (
 )
 
 var (
-	_ PoolItemProvider[[]byte]        = NormalSlice[byte]{}
-	_ PoolItemProvider[*bytes.Buffer] = NormalBytesBuffer{}
+	_ ItemProvider[[]byte]        = SliceProvider[byte]{}
+	_ ItemProvider[*bytes.Buffer] = BytesBufferProvider{}
 )
+
+func (p *AdaptivePool[T]) getStats() Stats {
+	p.statsMu.Lock()
+	defer p.statsMu.Unlock()
+	return p.stats
+}
 
 func TestAdaptivePool(t *testing.T) {
 	t.Parallel()
@@ -19,16 +25,15 @@ func TestAdaptivePool(t *testing.T) {
 	t.Run("ramping sizes", func(t *testing.T) {
 		t.Parallel()
 		const thresh = 1
-		v := func(n int) []int {
-			return make([]int, n)
+		v := func(n int) []byte {
+			return make([]byte, n)
 		}
-		capv := func(v []int) float64 {
-			return float64(cap(v))
+		lenv := func(v []byte) int {
+			return len(v)
 		}
 
-		x := newAdaptivePoolAsserter(t, NormalSlice[int]{
-			Threshold: thresh,
-		}, capv)
+		x := newAdaptivePoolAsserter(t, SliceProvider[byte]{},
+			NormalEstimator{thresh, 0}, lenv)
 		x.assertStats(0, 0, math.NaN())
 		x.assertPut(nil, true) // should be a nop
 		x.assertStats(0, 0, math.NaN())
@@ -69,13 +74,12 @@ func TestAdaptivePool(t *testing.T) {
 		v := func(n int) *bytes.Buffer {
 			return bytes.NewBuffer(make([]byte, n))
 		}
-		capv := func(v *bytes.Buffer) float64 {
-			return float64(v.Cap())
+		lenv := func(v *bytes.Buffer) int {
+			return v.Len()
 		}
 
-		x := newAdaptivePoolAsserter(t, NormalBytesBuffer{
-			Threshold: thresh,
-		}, capv)
+		x := newAdaptivePoolAsserter(t, BytesBufferProvider{},
+			NormalEstimator{thresh, 0}, lenv)
 		x.assertStats(0, 0, math.NaN())
 		x.assertPut(nil, true) // should be a nop
 		x.assertStats(0, 0, math.NaN())
@@ -103,49 +107,105 @@ func TestAdaptivePool(t *testing.T) {
 		if i < 2 {
 			sd = math.NaN()
 		}
-		expectedSize := normalCreateSize(values[1], sd, thresh)
-		x.assertGet(float64(int(expectedSize)))
+		st := EstimatorStats{
+			Mean:   values[1],
+			StdDev: sd,
+		}
+		expectedSize := x.es.Suggest(st)
+		x.assertGet(expectedSize)
 
 		x.ap.Put(nil) // should not panic
+	})
+
+	t.Run("different get", func(t *testing.T) {
+		t.Parallel()
+		const sz = 10
+		pr := &testProvider[[]byte]{
+			ItemProvider: SliceProvider[byte]{},
+		}
+		pl := &testPool{
+			pool: new(slicePool),
+		}
+		ap := New(pr, NormalEstimator{2, 0}, 500)
+		ap.pool = pl
+
+		plGet := pl.getCount
+		prNew := pr.newCount
+		ap.Get()
+		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
+		equal(t, prNew+1, pr.newCount, "should have tried ItemProvider")
+
+		plGet = pl.getCount
+		prNew = pr.newCount
+		ap.GetWithSize(sz)
+		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
+		equal(t, prNew+1, pr.newCount, "should have tried ItemProvider")
+
+		plGet = pl.getCount
+		prNew = pr.newCount
+		ap.GetWithSize(0)
+		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
+		equal(t, prNew+1, pr.newCount, "should have tried ItemProvider")
+
+		ap.Put(pr.ItemProvider.New(sz)) // right from the hose
+		plGet = pl.getCount
+		prNew = pr.newCount
+		ap.Get()
+		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
+		equal(t, prNew, pr.newCount, "should not have tried ItemProvider")
+
+		ap.Put(pr.ItemProvider.New(sz)) // right from the hose
+		plGet = pl.getCount
+		prNew = pr.newCount
+		ap.GetWithSize(sz)
+		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
+		equal(t, prNew, pr.newCount, "should not have tried ItemProvider")
+
+		ap.Put(pr.ItemProvider.New(sz)) // right from the hose
+		plGet = pl.getCount
+		prNew = pr.newCount
+		ap.GetWithSize(sz * sz * sz)
+		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
+		equal(t, prNew+1, pr.newCount, "should have tried ItemProvider")
 	})
 }
 
 type adaptivePoolAsserter[T any] struct {
 	t        *testing.T
 	pool     *testPool
-	provider PoolItemProvider[T]
-	capv     func(T) float64
+	provider ItemProvider[T]
+	lenv     func(T) int
 	ap       *AdaptivePool[T]
+	es       Estimator
 }
 
 func newAdaptivePoolAsserter[T any](
 	t *testing.T,
-	p PoolItemProvider[T],
-	capv func(T) float64,
+	p ItemProvider[T],
+	e Estimator,
+	lenv func(T) int,
 ) adaptivePoolAsserter[T] {
 	pool := new(testPool)
-	ap := New[T](p, 0)
+	ap := New[T](p, e, 0)
 	ap.pool = pool
-	pool.New = ap.new
 	return adaptivePoolAsserter[T]{
 		t:        t,
 		pool:     pool,
 		provider: p,
-		capv:     capv,
+		lenv:     lenv,
 		ap:       ap,
+		es:       e,
 	}
 }
 
-func (a adaptivePoolAsserter[T]) assertGet(expectedSize float64) {
+func (a adaptivePoolAsserter[T]) assertGet(expectCap int) {
 	a.t.Helper()
 	item := a.ap.Get()
-	if s := a.provider.Sizeof(item); s > 0 {
-		a.t.Fatalf("created items should have non-positive size, got %v", s)
+	if gotLen := a.lenv(item); gotLen != 0 {
+		a.t.Fatalf("expected item with length zero, got %v", gotLen)
 	}
-	got := a.capv(item)
-	if got != expectedSize {
-		a.t.Fatalf("expected item with size %v, got %v",
-			expectedSize, got)
+	if gotSz := a.provider.Sizeof(item); gotSz != expectCap {
+		a.t.Fatalf("expected item with capacity %v, got %v", expectCap, gotSz)
 	}
 }
 
@@ -166,7 +226,7 @@ func (a adaptivePoolAsserter[T]) assertPut(v T, expectDropped bool) {
 func (a adaptivePoolAsserter[T]) assertStats(n, mean, stdDev float64) {
 	// NOTE: numbers are round to 1 decimal to simplify tests
 	a.t.Helper()
-	st := a.ap.Stats()
+	st := a.ap.getStats()
 	gotN, gotMean, gotStdDev := st.N(), st.Mean(), st.StdDev()
 	mean, stdDev = roundOneDecimal(mean), roundOneDecimal(stdDev)
 	gotMean, gotStdDev = roundOneDecimal(gotMean), roundOneDecimal(gotStdDev)
@@ -182,62 +242,104 @@ func roundOneDecimal(v float64) float64 {
 	return math.Round(v*10) / 10
 }
 
-// testPool always returns a new object for Get, and counts calls to Put,
-// dropping all values passed to it. Not safe for concurrent use.
-type testPool struct {
-	New      func() any
-	putCount uint
+type testProvider[T any] struct {
+	ItemProvider[T]
+	newCount int
 }
 
-func (p *testPool) Get() any  { return p.New() }
-func (p *testPool) Put(x any) { p.putCount++ }
+func (p *testProvider[T]) New(prealloc int) T {
+	p.newCount++
+	return p.ItemProvider.New(prealloc)
+}
 
-func TestNormalCreateSize(t *testing.T) {
+type slicePool []any
+
+func (p *slicePool) Get() any {
+	if len(*p) > 0 {
+		ret := (*p)[len(*p)-1]
+		*p = (*p)[:len(*p)-1]
+		return ret
+	}
+	return nil
+}
+
+func (p *slicePool) Put(v any) {
+	*p = append(*p, v)
+}
+
+type testPool struct {
+	pool
+	getCount int
+	putCount int
+}
+
+func (p *testPool) Get() any {
+	p.getCount++
+	if p.pool != nil {
+		return p.pool.Get()
+	}
+	return nil
+}
+
+func (p *testPool) Put(x any) {
+	p.putCount++
+	if p.pool != nil {
+		p.pool.Put(x)
+	}
+}
+
+func TestNormalEstimator_Suggest(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		n, mean, stdDev, thresh, expected float64
+		mean, stdDev, thresh float64
+		expected             int
 	}{
-		{0, 42, 0, 0, 42},
-		{1, 42, 0, 0, 42},
-		{2, 3, 5, 7, 38},
+		{42, math.NaN(), 0, 42},
+		{42, math.NaN(), 0, 42},
+		{3, 5, 7, 38},
 	}
 
 	for i, tc := range testCases {
-		sd := tc.stdDev
-		if tc.n < 2 {
-			sd = math.NaN()
+		st := EstimatorStats{
+			Mean:   tc.mean,
+			StdDev: tc.stdDev,
 		}
-		got := normalCreateSize(tc.mean, sd, tc.thresh)
+		got := NormalEstimator{tc.thresh, 0}.Suggest(st)
 		if got != tc.expected {
 			t.Errorf("testCase[%v] unexpected %v, got %v", i, tc.expected, got)
 		}
+		newGot := NormalEstimator{tc.thresh, got + 1}.Suggest(st)
+		if newGot != got+1 {
+			t.Errorf("testCase[%v] min size is %v, got %v", i, got+1, newGot)
+		}
 	}
 }
 
-func TestNormalAccept(t *testing.T) {
+func TestNormalEstimator_Accept(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		n, mean, stdDev, thresh, itemSize float64
-		expected                          bool
+		mean, stdDev, thresh float64
+		itemSize             int
+		expected             bool
 	}{
-		{0, 0, math.NaN(), 0, 0, true},
-		{1, 0, math.NaN(), 0, 0, true},
-		{2, 10, 3, 1, 0, false},
-		{2, 10, 3, 1, 10, true},
-		{2, 10, 3, 1, 7, true},
-		{2, 10, 3, 1, 13, true},
-		{2, 10, 3, 1, 6.99, false},
-		{2, 10, 3, 1, 13.01, false},
+		{0, math.NaN(), 0, 0, true},
+		{0, math.NaN(), 0, 0, true},
+		{10, 3, 1, 0, false},
+		{10, 3, 1, 10, true},
+		{10, 3, 1, 7, true},
+		{10, 3, 1, 13, true},
+		{10, 3, 1, 6, false},
+		{10, 3, 1, 14, false},
 	}
 
 	for i, tc := range testCases {
-		sd := tc.stdDev
-		if tc.n < 2 {
-			sd = math.NaN()
+		st := EstimatorStats{
+			Mean:   tc.mean,
+			StdDev: tc.stdDev,
 		}
-		got := normalAccept(tc.mean, sd, tc.thresh, tc.itemSize)
+		got := NormalEstimator{tc.thresh, 0}.Accept(st, tc.itemSize)
 		if got != tc.expected {
 			t.Errorf("testCase[%v] unexpected %v", i, got)
 		}

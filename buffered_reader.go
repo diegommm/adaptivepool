@@ -16,22 +16,16 @@ type ReaderBufferer struct {
 	rdPool  sync.Pool
 }
 
-// NewReaderBufferer returns a new ReaderBufferer. The `minCap` and `thresh`
-// arguments will be the values of the internal [NormalSlice.MinCap] and
-// [NormalSlice.Threshold], respectively. Example:
+// NewReaderBufferer returns a new ReaderBufferer. Example:
 //
-//	rb := NewReaderBufferer(512, 2, 500)
-func NewReaderBufferer(minCap int, thresh, maxN float64) *ReaderBufferer {
-	return new(ReaderBufferer).init(minCap, thresh, maxN)
+//	rb := NewReaderBufferer(NormalEstimator{2}, 500)
+func NewReaderBufferer(e Estimator, maxN float64) *ReaderBufferer {
+	return new(ReaderBufferer).init(e, maxN)
 }
 
-func (p *ReaderBufferer) init(minCap int, thresh,
-	maxN float64) *ReaderBufferer {
+func (p *ReaderBufferer) init(e Estimator, maxN float64) *ReaderBufferer {
 	p.rdPool.New = newBytesReader
-	p.bufPool.init(NormalSlice[byte]{
-		MinCap:    minCap,
-		Threshold: thresh,
-	}, maxN)
+	p.bufPool.init(SliceProvider[byte]{}, e, maxN)
 	return p
 }
 
@@ -39,47 +33,39 @@ func newBytesReader() any {
 	return bytes.NewReader(nil)
 }
 
-// Stats returns the statistics from the internal AdaptivePool.
-func (p *ReaderBufferer) Stats() Stats {
-	return p.bufPool.Stats()
+// Reader buffers the contents of the given io.Reader in a
+// BufferedReader. If `sz` is positive, then `sz` bytes will be pre-allocated,
+// otherwise an estimation will be used based on the passed observed values.
+func (p *ReaderBufferer) Reader(r io.Reader, sz int) (*BufferedReader, error) {
+	return p.buf(r, nil, sz)
 }
 
-// Reader buffers the contents of the given io.Reader in a BufferedReader.
-func (p *ReaderBufferer) Reader(r io.Reader) (*BufferedReader, error) {
-	return p.buf(r, nil)
-}
-
-// ReadCloser buffers the contents of the given io.ReadCloser in a
-// BufferedReader. It always calls Close, and it fails if it returns an error.
-func (p *ReaderBufferer) ReadCloser(rc io.ReadCloser) (*BufferedReader, error) {
-	return p.buf(rc, rc)
+// ReadCloser is like `Reader` but receives an io.ReadCloser instead. It always
+// calls the argument's `Close` method, and it fails if it returns an error.
+func (p *ReaderBufferer) ReadCloser(rc io.ReadCloser,
+	sz int) (*BufferedReader, error) {
+	return p.buf(rc, rc, sz)
 }
 
 func (p *ReaderBufferer) buf(r io.Reader,
-	c io.Closer) (*BufferedReader, error) {
-	buf := p.bufPool.Get()
-	bytesBuf := bytes.NewBuffer(buf)
+	c io.Closer, sz int) (*BufferedReader, error) {
+	buf := p.getBuf(sz)
+	bytesBuf := bytes.NewBuffer(buf[:0])
 	n, readErr := bytesBuf.ReadFrom(r)
 	if readErr != nil && c == nil {
 		p.put(buf)
-		return nil, fmt.Errorf("read io.Reader: %w; bytes read: %v", readErr, n)
+		return nil, fmt.Errorf("buffer io.Reader: %w; bytes read: %v", readErr,
+			n)
 	}
-	buf = bytesBuf.Bytes()
+	buf = bytesBuf.Bytes() // reslices up to what was read
 
-	var closeErr error
 	if c != nil {
-		closeErr = c.Close()
-		if readErr == nil && closeErr != nil {
+		closeErr := c.Close()
+		if readErr != nil || closeErr != nil {
 			p.put(buf)
-			return nil, fmt.Errorf("close io.ReadCloser: %w; bytes read: %v",
-				closeErr, n)
+			return nil, fmt.Errorf("buffer io.ReadCloser: read error: %w; "+
+				"close error: %w; bytes read: %v", readErr, closeErr, n)
 		}
-	}
-
-	if readErr != nil || closeErr != nil {
-		p.put(buf)
-		return nil, fmt.Errorf("buffer io.ReadCloser: read error: %w; close"+
-			" error: %w; bytes read: %v", readErr, closeErr, n)
 	}
 
 	rd := p.rdPool.Get().(*bytes.Reader)
@@ -92,6 +78,13 @@ func (p *ReaderBufferer) buf(r io.Reader,
 	}, nil
 }
 
+func (p *ReaderBufferer) getBuf(sz int) []byte {
+	if sz > 0 {
+		return p.bufPool.GetWithSize(sz)
+	}
+	return p.bufPool.Get()
+}
+
 func (p *ReaderBufferer) release(buf []byte, rd *bytes.Reader) {
 	rd.Reset(nil)
 	p.rdPool.Put(rd)
@@ -100,6 +93,11 @@ func (p *ReaderBufferer) release(buf []byte, rd *bytes.Reader) {
 
 func (p *ReaderBufferer) put(buf []byte) {
 	if cap(buf) > 0 {
+		// many methods are allowed to use extra space as a scratch, and then
+		// the buffer could have been potentially resliced. This means that we
+		// can't trust that the last cap(buf)-len(buf) bytes don't have any
+		// information that could potentially be confidential, thus we need
+		// clear all the underlying array
 		clear(buf[:cap(buf)])
 		p.bufPool.Put(buf)
 	}
