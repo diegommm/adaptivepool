@@ -57,7 +57,7 @@ func TestReaderBufferer(t *testing.T) {
 		const reqAlloc = 1024
 		brr := NewReaderBufferer(NormalEstimator{2, 0}, 500)
 
-		br, err := brr.ReaderWithSize(bytes.NewReader(nil), reqAlloc)
+		br, err := brr.ReaderWithCost(bytes.NewReader(nil), reqAlloc)
 		zero(t, err, "Reader error on empty io.Reader")
 		equal(t, true, br != nil, "nil Reader")
 
@@ -95,7 +95,7 @@ func TestReaderBufferer(t *testing.T) {
 			brr := NewReaderBufferer(NormalEstimator{2, 0}, 500)
 
 			rc := io.NopCloser(bytes.NewReader([]byte(testData)))
-			br, err := brr.ReadCloserWithSize(rc, reqAlloc)
+			br, err := brr.ReadCloserWithCost(rc, reqAlloc)
 			zero(t, err, "Reader error on non-empty io.Reader")
 			equal(t, true, br != nil, "nil Reader")
 
@@ -240,7 +240,7 @@ func finishAndTestBufferedReaderInternal(t *testing.T, br *BufferedReader,
 		_, s, err := br.ReadRune()
 		zero(t, err, "ReadRune on non-empty *BufferedReader")
 		if s < 2 {
-			t.Fatalf("unexpected rune size %d from non-empty *BufferedReader "+
+			t.Fatalf("unexpected rune cost %d from non-empty *BufferedReader "+
 				"(remember to use test data starting with non-ASCII, wide "+
 				"characters", s)
 		}

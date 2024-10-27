@@ -38,10 +38,10 @@ func (p *ReaderBufferer) Reader(r io.Reader) (*BufferedReader, error) {
 	return p.buf(r, nil, 0)
 }
 
-// ReaderWithSize buffers the contents of the given io.Reader in a
+// ReaderWithCost buffers the contents of the given io.Reader in a
 // BufferedReader. If `sz` is positive, then `sz` bytes will be pre-allocated,
 // otherwise an estimation will be used based on the past observed values.
-func (p *ReaderBufferer) ReaderWithSize(r io.Reader,
+func (p *ReaderBufferer) ReaderWithCost(r io.Reader,
 	sz int) (*BufferedReader, error) {
 	return p.buf(r, nil, sz)
 }
@@ -53,12 +53,12 @@ func (p *ReaderBufferer) ReadCloser(rc io.ReadCloser) (*BufferedReader, error) {
 	return p.buf(rc, rc, 0)
 }
 
-// ReadCloserWithSize buffers the contents of the given io.ReadCloser in a
+// ReadCloserWithCost buffers the contents of the given io.ReadCloser in a
 // BufferedReader. If `sz` is positive, then `sz` bytes will be pre-allocated,
 // otherwise an estimation will be used based on the past observed values. It
 // always calls the argument's `Close` method, and it fails if it returns an
 // error.
-func (p *ReaderBufferer) ReadCloserWithSize(rc io.ReadCloser,
+func (p *ReaderBufferer) ReadCloserWithCost(rc io.ReadCloser,
 	sz int) (*BufferedReader, error) {
 	return p.buf(rc, rc, sz)
 }
@@ -96,7 +96,7 @@ func (p *ReaderBufferer) buf(r io.Reader,
 
 func (p *ReaderBufferer) getBuf(sz int) []byte {
 	if sz > 0 {
-		return p.bufPool.GetWithSize(sz)
+		return p.bufPool.GetWithCost(sz)
 	}
 	return p.bufPool.Get()
 }
@@ -202,7 +202,7 @@ func (bb *BufferedReader) UnreadByte() error {
 }
 
 // ReadRune is part of the implementation of the io.RuneReader interface.
-func (bb *BufferedReader) ReadRune() (r rune, size int, err error) {
+func (bb *BufferedReader) ReadRune() (r rune, cost int, err error) {
 	if bb.reader != nil {
 		return bb.reader.ReadRune()
 	}

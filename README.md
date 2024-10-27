@@ -7,7 +7,7 @@
 
 Package **adaptivepool** provides a free list based on sync.Pool that can
 stochastically define which items should be reused, based on a measure of
-choice called size.
+choice called cost.
 
 Example usage of AdaptivePool:
 
@@ -49,7 +49,7 @@ func bufferAndClose(next http.Handler) http.Handler {
     )
 
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        rc, err := bodiesPool.ReadCloserWithSize(r.Body, int(r.ContentLength))
+        rc, err := bodiesPool.ReadCloserWithCost(r.Body, int(r.ContentLength))
         if err != nil {
             w.WriteHeader(http.StatusInternalServerError)
             log.Printf("buffer request: %v", err)
@@ -64,21 +64,22 @@ func bufferAndClose(next http.Handler) http.Handler {
 ## AdaptivePool
 
 The API is very similar to that of [sync.Pool], but it uses specific types
-instead of `any`. It uses a basic rolling statistics implementation to keep
-track of the number of items `Put` in the pool, the Mean, and Standard Deviation
-of their measured size. An additional parameter provided during creation,
+instead of `any`. It keeps a basic set of online statistics about the cost of
+items `Put` in the pool. An additional parameter provided during creation,
 `maxN`, allows to increase the adaptability of the system to seasonal changes.
 
-The implementation decouples both type-specific operations as well as the
-decision on when an item is elligible for reuse with the `ItemProvider` and
-`Estimator` interfaces. Two implementations for `ItemProvider` are given: a
+The implementation delegates type-specific operations like measuring the cost of
+an item or creating an item with a specific cost to the `ItemProvider`
+interface; and the reuse policy and estimation of the cost of new items to the
+`Estimator` interface. Two implementations for `ItemProvider` are given: a
 generic one for slices and one for `*bytes.Buffer`. Both have a similar
 treatment of the items, clearing all bytes before putting them back into the
-pool. This is to prevent accidentally leaking confidential data into other uses.
-The `NormalEstimator` implementation of `Estimator` will discard items with a
-size outside of the inclusive range `Mean ± Threshold * StdDev`, and newly
-created items will have a preallocated size of `Mean + Threshold * StdDev`, and
-with a minimum size of `MinCap`.
+pool. This is to prevent accidentally leaking confidential data into other uses,
+but can be disabled by making a new implementation, which should be trivial. The
+`NormalEstimator` implementation of `Estimator` will discard items with a cost
+outside of the inclusive range `Mean ± Threshold * StdDev`, and newly created
+items will have a preallocated cost of `Mean + Threshold * StdDev`, and with a
+minimum cost of `MinCap`.
 
 ## Running tests and benchmarks
 

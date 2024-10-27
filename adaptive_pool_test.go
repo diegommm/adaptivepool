@@ -22,7 +22,7 @@ func (p *AdaptivePool[T]) getStats() Stats {
 func TestAdaptivePool(t *testing.T) {
 	t.Parallel()
 
-	t.Run("ramping sizes", func(t *testing.T) {
+	t.Run("ramping costs", func(t *testing.T) {
 		t.Parallel()
 		const thresh = 1
 		v := func(n int) []byte {
@@ -111,8 +111,8 @@ func TestAdaptivePool(t *testing.T) {
 			Mean:   values[1],
 			StdDev: sd,
 		}
-		expectedSize := x.es.Suggest(st)
-		x.assertGet(expectedSize)
+		expectedCost := x.es.Suggest(st)
+		x.assertGet(expectedCost)
 
 		x.ap.Put(nil) // should not panic
 	})
@@ -137,13 +137,13 @@ func TestAdaptivePool(t *testing.T) {
 
 		plGet = pl.getCount
 		prNew = pr.newCount
-		ap.GetWithSize(sz)
+		ap.GetWithCost(sz)
 		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
 		equal(t, prNew+1, pr.newCount, "should have tried ItemProvider")
 
 		plGet = pl.getCount
 		prNew = pr.newCount
-		ap.GetWithSize(0)
+		ap.GetWithCost(0)
 		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
 		equal(t, prNew+1, pr.newCount, "should have tried ItemProvider")
 
@@ -157,14 +157,14 @@ func TestAdaptivePool(t *testing.T) {
 		ap.Put(pr.ItemProvider.New(sz)) // right from the hose
 		plGet = pl.getCount
 		prNew = pr.newCount
-		ap.GetWithSize(sz)
+		ap.GetWithCost(sz)
 		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
 		equal(t, prNew, pr.newCount, "should not have tried ItemProvider")
 
 		ap.Put(pr.ItemProvider.New(sz)) // right from the hose
 		plGet = pl.getCount
 		prNew = pr.newCount
-		ap.GetWithSize(sz * sz * sz)
+		ap.GetWithCost(sz * sz * sz)
 		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
 		equal(t, prNew+1, pr.newCount, "should have tried ItemProvider")
 	})
@@ -204,7 +204,7 @@ func (a adaptivePoolAsserter[T]) assertGet(expectCap int) {
 	if gotLen := a.lenv(item); gotLen != 0 {
 		a.t.Fatalf("expected item with length zero, got %v", gotLen)
 	}
-	if gotSz := a.provider.Sizeof(item); gotSz != expectCap {
+	if gotSz := a.provider.Costof(item); gotSz != expectCap {
 		a.t.Fatalf("expected item with capacity %v, got %v", expectCap, gotSz)
 	}
 }
@@ -311,7 +311,7 @@ func TestNormalEstimator_Suggest(t *testing.T) {
 		}
 		newGot := NormalEstimator{tc.thresh, got + 1}.Suggest(st)
 		if newGot != got+1 {
-			t.Errorf("testCase[%v] min size is %v, got %v", i, got+1, newGot)
+			t.Errorf("testCase[%v] min cost is %v, got %v", i, got+1, newGot)
 		}
 	}
 }
@@ -321,7 +321,7 @@ func TestNormalEstimator_Accept(t *testing.T) {
 
 	testCases := []struct {
 		mean, stdDev, thresh float64
-		itemSize             int
+		itemCost             int
 		expected             bool
 	}{
 		{0, math.NaN(), 0, 0, true},
@@ -339,7 +339,7 @@ func TestNormalEstimator_Accept(t *testing.T) {
 			Mean:   tc.mean,
 			StdDev: tc.stdDev,
 		}
-		got := NormalEstimator{tc.thresh, 0}.Accept(st, tc.itemSize)
+		got := NormalEstimator{tc.thresh, 0}.Accept(st, tc.itemCost)
 		if got != tc.expected {
 			t.Errorf("testCase[%v] unexpected %v", i, got)
 		}
