@@ -174,13 +174,11 @@ func (p *AdaptivePool[T]) Get() T {
 // GetWithCost returns a new object with the specified cost from the pool,
 // allocating it from the ItemProvider if needed.
 func (p *AdaptivePool[T]) GetWithCost(cost int) T {
-	if v := p.pool.Get(); v != nil {
-		// if the item we got from the pool is smaller than needed, drop it for
-		// garbage collection and instead directly allocate a new one with the
-		// appropriate cost
-		if ret := v.(T); p.provider.Costof(ret) >= cost {
-			return ret
-		}
+	// if the item we got from the pool is smaller than needed, drop it for
+	// garbage collection and instead directly allocate a new one with the
+	// appropriate cost
+	if v, ok := p.pool.Get().(T); ok && p.provider.Costof(v) >= cost {
+		return v
 	}
 	return p.provider.New(cost)
 }
