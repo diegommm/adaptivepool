@@ -3,12 +3,12 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/diegommm/adaptivepool)](https://goreportcard.com/report/github.com/diegommm/adaptivepool)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2a3bd79d8ed64cb5bd30ffae9e4f0486)](https://app.codacy.com/gh/diegommm/adaptivepool/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
-# Stochastic free list based on sync.Pool
+# Statistical free list based on sync.Pool
 
 Package **adaptivepool** provides a free list based on
-[sync.Pool](https://pkg.go.dev/sync#Pool) that can stochastically define which
-items should be reused and how they should be pre-allocated, based on a set of
-online stats of a measure of choice called cost.
+[sync.Pool](https://pkg.go.dev/sync#Pool) that can determine which items should
+be reused and how they should be pre-allocated based on a set of online stats of
+a measure of choice called cost.
 
 Example usage of `AdaptivePool`:
 
