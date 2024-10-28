@@ -6,9 +6,7 @@ import (
 	"compress/bzip2"
 	_ "embed"
 	"encoding/csv"
-	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"strconv"
 	"testing"
@@ -69,26 +67,4 @@ func csvTestDataReader(tb testing.TB) *csv.Reader {
 	cr.ReuseRecord = true
 
 	return cr
-}
-
-func allTestDataInputValues(tb testing.TB) []float64 {
-	tb.Helper()
-
-	ret := make([]float64, 0, 10_000)
-
-	cr := csvTestDataReader(tb)
-	for i := 1; ; i++ {
-		rec, err := cr.Read()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		zero(tb, err, "read CSV record #%d", i)
-
-		f, err := strconv.ParseFloat(rec[0], 64)
-		zero(tb, err, "parse first float value from record #%d", i)
-
-		ret = append(ret, f)
-	}
-
-	return ret
 }

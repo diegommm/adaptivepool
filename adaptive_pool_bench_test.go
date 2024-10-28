@@ -56,7 +56,7 @@ func BenchmarkAdaptivePool(b *testing.B) {
 	b.Run("implem=sync.Pool/method=Get/created=false", func(b *testing.B) {
 		p := new(sync.Pool)
 		for i := 0; i < b.N; i++ {
-			p.Put(1)
+			p.Put(1) //nolint:staticcheck
 		}
 		var valid int
 		b.ReportAllocs()
@@ -74,7 +74,7 @@ func BenchmarkAdaptivePool(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			p.Put(1)
+			p.Put(1) //nolint:staticcheck
 		}
 	})
 
