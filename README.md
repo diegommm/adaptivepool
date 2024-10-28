@@ -5,11 +5,12 @@
 
 # Stochastic free list based on sync.Pool
 
-Package **adaptivepool** provides a free list based on sync.Pool that can
-stochastically define which items should be reused, based on a measure of
-choice called cost.
+Package **adaptivepool** provides a free list based on
+[sync.Pool](https://pkg.go.dev/sync#Pool) that can stochastically define which
+items should be reused and how they should be pre-allocated, based on a set of
+online stats of a measure of choice called cost.
 
-Example usage of AdaptivePool:
+Example usage of `AdaptivePool`:
 
 ```go
 // pool holds *bytes.Buffer items for reuse
@@ -17,7 +18,7 @@ var pool = adaptivepool.New(
     adaptivepool.BytesBufferProvider{},
     adaptivepool.NormalEstimator{
         Threshold: 2, // reuse buffer if its Cap is in Mean ± 2 * StdDev
-        MinCost: 512, // minimum cost of newly created items
+        MinCost: 512, // minimum cost (bytes) of newly created items
     },
     500, // bias towards the latest 500 elements to increase adaptability
 )
@@ -43,7 +44,7 @@ func bufferAndClose(next http.Handler) http.Handler {
     bodiesPool := adaptivepool.NewReaderBufferer(
         adaptivepool.NormalEstimator{
             Threshold: 2, // reuse buffer if its Cap is in Mean ± 2 * StdDev
-            MinCost: 512, // minimum cost of newly created items
+            MinCost: 512, // minimum cost (bytes) of newly created items
         },
         500, // bias towards the latest 500 elements to increase adaptability
     )
@@ -65,21 +66,23 @@ func bufferAndClose(next http.Handler) http.Handler {
 
 The API is very similar to that of [sync.Pool], but it uses specific types
 instead of `any`. It keeps a basic set of online statistics about the cost of
-items `Put` in the pool. An additional parameter provided during creation,
-`maxN`, allows to increase the adaptability of the system to seasonal changes.
+items `Put` into the pool. It is also possible to obtain an item with a
+specified minimum cost from the pool. An additional parameter provided during
+creation, `maxN`, allows to increase the adaptability of the system to seasonal
+changes.
 
 The implementation delegates type-specific operations like measuring the cost of
 an item or creating an item with a specific cost to the `ItemProvider`
 interface; and the reuse policy and estimation of the cost of new items to the
 `Estimator` interface. Two implementations for `ItemProvider` are given: a
 generic one for slices and one for `*bytes.Buffer`. Both have a similar
-treatment of the items, clearing all bytes before putting them back into the
-pool. This is to prevent accidentally leaking confidential data into other uses,
-but can be disabled by making a new implementation, which should be trivial. The
-`NormalEstimator` implementation of `Estimator` will discard items with a cost
-outside of the inclusive range `Mean ± Threshold * StdDev`, and newly created
-items will have a preallocated cost of `Mean + Threshold * StdDev`, and with a
-minimum cost of `MinCost`.
+treatment of the items, considering the cost as the item capacity, and clearing
+all data before putting the item back into the pool. This is to prevent
+accidentally leaking confidential data into other uses. The `NormalEstimator`
+implementation of `Estimator` will discard items with a cost outside of the
+inclusive range `Mean ± Threshold * StdDev`, and newly created items will have a
+preallocated cost of `Mean + Threshold * StdDev`, and with a minimum cost of
+`MinCost`.
 
 ## Running tests and benchmarks
 
