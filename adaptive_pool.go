@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 )
 
-// ItemProvider creates and measures items for an [AdaptivePool].
+// ItemProvider handles and measures items for an [AdaptivePool].
 type ItemProvider[T any] interface {
 	// Costof measures the cost of an item. Items with cost zero will not be put
 	// back in the pool nor will be fed into statistics.
@@ -45,12 +45,13 @@ func (p SliceProvider[T]) Reset(v []T) []T {
 // BytesBufferProvider is an [ItemProvider] for [*bytes.Buffer] items.
 type BytesBufferProvider struct{}
 
-// Costof returns the capacity of the buffer, and zero if it's nil.
+// Costof returns the capacity of the buffer if it's not nil, and zero if it's
+// nil.
 func (p BytesBufferProvider) Costof(v *bytes.Buffer) int {
-	if v == nil {
-		return 0
+	if v != nil {
+		return v.Cap()
 	}
-	return v.Cap()
+	return 0
 }
 
 // Reset clears the underlying data and returns the buffer after resetting it.
@@ -102,8 +103,9 @@ type NormalEstimator struct {
 	MinCost   int     // Minimum cost that will be suggested.
 }
 
-// Suggest initially uses `mean ± e.Threshold * stdDev` as an estimation if
-// `stdDev` is not `NaN`, or `mean` otherwise.
+// Suggest returns `mean ± e.Threshold * stdDev` as an estimation if `stdDev` is
+// not `NaN`, or `mean` otherwise. If `MinCost` is positive, then it will not
+// return a value less than that.
 func (e NormalEstimator) Suggest(s EstimatorStats) int {
 	if math.IsNaN(s.StdDev) {
 		return max(e.MinCost, int(math.Round(s.Mean)))
@@ -111,7 +113,7 @@ func (e NormalEstimator) Suggest(s EstimatorStats) int {
 	return max(e.MinCost, int(math.Round(s.Mean+e.Threshold*s.StdDev)))
 }
 
-// Accept will return false if `stdDev` is `NaN` or if `itemCost` is in the
+// Accept will return true if `stdDev` is `NaN` or if `itemCost` is in the
 // inclusive range `mean ± e.Threshold * stdDev`.
 func (e NormalEstimator) Accept(s EstimatorStats, itemCost int) bool {
 	if math.IsNaN(s.StdDev) {
@@ -122,8 +124,8 @@ func (e NormalEstimator) Accept(s EstimatorStats, itemCost int) bool {
 	return s.Mean-sdThresh <= ct64 && ct64 <= s.Mean+sdThresh
 }
 
-// AdaptivePool uses an [ItemProvider] to more effectively use an internal
-// [sync.Pool].
+// AdaptivePool uses an [Estimator] to more effectively use an internal
+// [sync.Pool] that holds items created by an [ItemProvider].
 type AdaptivePool[T any] struct {
 	pool      pool
 	provider  ItemProvider[T]
@@ -187,6 +189,8 @@ func (p *AdaptivePool[T]) GetWithCost(cost int) T {
 // it back into the pool if [Estimator.Accept] allows it. Items with a
 // non-positive cost are immediately dropped.
 func (p *AdaptivePool[T]) Put(x T) {
+	// we call Reset here, which would allow an implementation to hijack the
+	// item if they wanted to, and then return a zero-cost item
 	p.provider.Reset(x)
 	s := p.provider.Costof(x)
 	if s < 1 {
@@ -203,8 +207,6 @@ func (p *AdaptivePool[T]) Put(x T) {
 }
 
 func (p *AdaptivePool[T]) writeThenRead(s int) (mean, stdDev float64) {
-	// this could be changed to a TryLock and return an additional false on lock
-	// failure, in which case the item would also not be put in the pool
 	p.statsMu.Lock()
 	defer p.statsMu.Unlock()
 	p.stats.Push(float64(s))

@@ -16,9 +16,7 @@ type ReaderBufferer struct {
 	rdPool  sync.Pool
 }
 
-// NewReaderBufferer returns a new ReaderBufferer. Example:
-//
-//	rb := NewReaderBufferer(NormalEstimator{2}, 500)
+// NewReaderBufferer returns a new ReaderBufferer.
 func NewReaderBufferer(e Estimator, maxN float64) *ReaderBufferer {
 	return new(ReaderBufferer).init(e, maxN)
 }
@@ -109,11 +107,9 @@ func (p *ReaderBufferer) release(buf []byte, rd *bytes.Reader) {
 
 // NOTE: we explicitly do not want to offer io.ReaderAt in BufferedReader
 // because, as per its docs, "Clients of ReadAt can execute parallel ReadAt
-// calls on the same input source". This means that we should add a sync.RWMutex
-// to protect the underlying implementation and make it more heavyweight in
-// order to guard the parallel ReadAt operations from potential Close
-// operations. Clients can still use the Seek method and then Read as a
-// sequential workaround.
+// calls on the same input source". This means that we should guard the parallel
+// ReadAt operations from potentially Close operations. Clients can still use
+// the Seek method and then Read as a sequential workaround.
 
 // BufferedReader holds a read-only buffer of the contents extracted from an
 // [io.Reader] or [io.ReadCloser]. Its `Close` method releases internal buffers
@@ -158,7 +154,7 @@ func (bb *BufferedReader) Read(p []byte) (int, error) {
 
 // Close is part of the implementation of the io.Closer interface. This method
 // releases the internal buffer for reuse. After this, the *BufferedReader will
-// be empty. This method is idempotent and always returns a nil error.
+// be empty. This method is idempotent.
 func (bb *BufferedReader) Close() error {
 	if bb.reader != nil {
 		bb.release(bb.buf, bb.reader)
