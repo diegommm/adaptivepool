@@ -17,7 +17,7 @@ var pool = adaptivepool.New(
     adaptivepool.BytesBufferProvider{},
     adaptivepool.NormalEstimator{
         Threshold: 2, // reuse buffer if its Len is in Mean ± 2 * StdDev
-        MinCap: 512,  // minimum capacity of newly created items
+        MinCost: 512, // minimum cost of newly created items
     },
     500, // bias towards the latest 500 elements to increase adaptability
 )
@@ -43,7 +43,7 @@ func bufferAndClose(next http.Handler) http.Handler {
     bodiesPool := adaptivepool.NewReaderBufferer(
         adaptivepool.NormalEstimator{
             Threshold: 2, // reuse buffer if its Len is in Mean ± 2 * StdDev
-            MinCap: 512,  // minimum capacity of newly created items
+            MinCost: 512, // minimum cost of newly created items
         },
         500, // bias towards the latest 500 elements to increase adaptability
     )
@@ -79,7 +79,7 @@ but can be disabled by making a new implementation, which should be trivial. The
 `NormalEstimator` implementation of `Estimator` will discard items with a cost
 outside of the inclusive range `Mean ± Threshold * StdDev`, and newly created
 items will have a preallocated cost of `Mean + Threshold * StdDev`, and with a
-minimum cost of `MinCap`.
+minimum cost of `MinCost`.
 
 ## Running tests and benchmarks
 
