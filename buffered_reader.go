@@ -39,11 +39,11 @@ func (p *ReaderBufferer) Reader(r io.Reader) (*BufferedReader, error) {
 }
 
 // ReaderWithCost buffers the contents of the given io.Reader in a
-// BufferedReader. If `sz` is positive, then `sz` bytes will be pre-allocated,
+// BufferedReader. If `ct` is positive, then `ct` bytes will be pre-allocated,
 // otherwise an estimation will be used based on the past observed values.
 func (p *ReaderBufferer) ReaderWithCost(r io.Reader,
-	sz int) (*BufferedReader, error) {
-	return p.buf(r, nil, sz)
+	ct int) (*BufferedReader, error) {
+	return p.buf(r, nil, ct)
 }
 
 // ReadCloser buffers the contents of the given io.ReadCloser in a
@@ -54,18 +54,18 @@ func (p *ReaderBufferer) ReadCloser(rc io.ReadCloser) (*BufferedReader, error) {
 }
 
 // ReadCloserWithCost buffers the contents of the given io.ReadCloser in a
-// BufferedReader. If `sz` is positive, then `sz` bytes will be pre-allocated,
+// BufferedReader. If `ct` is positive, then `ct` bytes will be pre-allocated,
 // otherwise an estimation will be used based on the past observed values. It
 // always calls the argument's `Close` method, and it fails if it returns an
 // error.
 func (p *ReaderBufferer) ReadCloserWithCost(rc io.ReadCloser,
-	sz int) (*BufferedReader, error) {
-	return p.buf(rc, rc, sz)
+	ct int) (*BufferedReader, error) {
+	return p.buf(rc, rc, ct)
 }
 
 func (p *ReaderBufferer) buf(r io.Reader,
-	c io.Closer, sz int) (*BufferedReader, error) {
-	buf := p.getBuf(sz)
+	c io.Closer, ct int) (*BufferedReader, error) {
+	buf := p.getBuf(ct)
 	bytesBuf := bytes.NewBuffer(buf[:0])
 	n, readErr := bytesBuf.ReadFrom(r)
 	if readErr != nil && c == nil {
@@ -94,9 +94,9 @@ func (p *ReaderBufferer) buf(r io.Reader,
 	}, nil
 }
 
-func (p *ReaderBufferer) getBuf(sz int) []byte {
-	if sz > 0 {
-		return p.bufPool.GetWithCost(sz)
+func (p *ReaderBufferer) getBuf(ct int) []byte {
+	if ct > 0 {
+		return p.bufPool.GetWithCost(ct)
 	}
 	return p.bufPool.Get()
 }

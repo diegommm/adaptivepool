@@ -38,18 +38,18 @@ func TestAdaptivePool(t *testing.T) {
 		x.assertPut(nil, true) // should be a nop
 		x.assertStats(0, 0, math.NaN())
 		x.assertGet(0)
-		x.assertGet(0)            // should not change capacity
+		x.assertGet(0)            // should not change cost
 		x.assertPut(v(10), false) // n=1 ; mean=10   ; stdDev=NaN
 		x.assertStats(1, 10, math.NaN())
 		x.assertGet(10)
-		x.assertGet(10)           // should not change capacity
+		x.assertGet(10)           // should not change cost
 		x.assertPut(v(10), false) // n=2 ; mean=10   ; stdDev=0
 		x.assertPut(v(10), false) // n=3 ; mean=10   ; stdDev=0
 		x.assertPut(v(20), true)  // n=4 ; mean=12.5 ; stdDev=4.3
 		x.assertPut(v(20), true)  // n=5 ; mean=14   ; stdDev=4.8
 		x.assertPut(v(20), false) // n=6 ; mean=15   ; stdDev=5
 		x.assertGet(20)
-		x.assertGet(20)          // should not change capacity
+		x.assertGet(20)          // should not change cost
 		x.assertPut(v(30), true) // n=7 ; mean=17.1 ; stdDev=6.9
 		x.assertPut(v(30), true) // n=8 ; mean=18.7 ; stdDev=7.8
 		x.assertPut(v(30), true) // n=9 ; mean=20   ; stdDev=8.1
@@ -60,7 +60,7 @@ func TestAdaptivePool(t *testing.T) {
 		x.assertPut(v(50), true) // n=14; mean=30.7 ; stdDev=15.7
 		x.assertPut(v(50), true) // n=15; mean=32   ; stdDev=16
 		x.assertGet(48)
-		x.assertGet(48) // should not change capacity
+		x.assertGet(48) // should not change cost
 
 		// we have added enough cherry-picked values so that stats will likely
 		// be very precise already, even if the Stats implementation is not very
@@ -119,7 +119,7 @@ func TestAdaptivePool(t *testing.T) {
 
 	t.Run("different get", func(t *testing.T) {
 		t.Parallel()
-		const sz = 10
+		const ct = 10
 		pr := &testProvider[[]byte]{
 			ItemProvider: SliceProvider[byte]{},
 		}
@@ -137,7 +137,7 @@ func TestAdaptivePool(t *testing.T) {
 
 		plGet = pl.getCount
 		prNew = pr.newCount
-		ap.GetWithCost(sz)
+		ap.GetWithCost(ct)
 		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
 		equal(t, prNew+1, pr.newCount, "should have tried ItemProvider")
 
@@ -147,24 +147,24 @@ func TestAdaptivePool(t *testing.T) {
 		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
 		equal(t, prNew+1, pr.newCount, "should have tried ItemProvider")
 
-		ap.Put(pr.ItemProvider.New(sz)) // right from the hose
+		ap.Put(pr.ItemProvider.New(ct)) // right from the hose
 		plGet = pl.getCount
 		prNew = pr.newCount
 		ap.Get()
 		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
 		equal(t, prNew, pr.newCount, "should not have tried ItemProvider")
 
-		ap.Put(pr.ItemProvider.New(sz)) // right from the hose
+		ap.Put(pr.ItemProvider.New(ct)) // right from the hose
 		plGet = pl.getCount
 		prNew = pr.newCount
-		ap.GetWithCost(sz)
+		ap.GetWithCost(ct)
 		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
 		equal(t, prNew, pr.newCount, "should not have tried ItemProvider")
 
-		ap.Put(pr.ItemProvider.New(sz)) // right from the hose
+		ap.Put(pr.ItemProvider.New(ct)) // right from the hose
 		plGet = pl.getCount
 		prNew = pr.newCount
-		ap.GetWithCost(sz * sz * sz)
+		ap.GetWithCost(ct * ct * ct)
 		equal(t, plGet+1, pl.getCount, "should have tried from the pool")
 		equal(t, prNew+1, pr.newCount, "should have tried ItemProvider")
 	})
@@ -198,14 +198,14 @@ func newAdaptivePoolAsserter[T any](
 	}
 }
 
-func (a adaptivePoolAsserter[T]) assertGet(expectCap int) {
+func (a adaptivePoolAsserter[T]) assertGet(expectCost int) {
 	a.t.Helper()
 	item := a.ap.Get()
 	if gotLen := a.lenv(item); gotLen != 0 {
 		a.t.Fatalf("expected item with length zero, got %v", gotLen)
 	}
-	if gotSz := a.provider.Costof(item); gotSz != expectCap {
-		a.t.Fatalf("expected item with capacity %v, got %v", expectCap, gotSz)
+	if gotCt := a.provider.Costof(item); gotCt != expectCost {
+		a.t.Fatalf("expected item with capacity %v, got %v", expectCost, gotCt)
 	}
 }
 

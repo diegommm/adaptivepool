@@ -45,7 +45,7 @@ func (p SliceProvider[T]) Reset(v []T) []T {
 // BytesBufferProvider is an [ItemProvider] for [*bytes.Buffer] items.
 type BytesBufferProvider struct{}
 
-// Costof returns the capacity of the item, and zero if it's nil.
+// Costof returns the capacity of the buffer, and zero if it's nil.
 func (p BytesBufferProvider) Costof(v *bytes.Buffer) int {
 	if v == nil {
 		return 0
@@ -117,9 +117,9 @@ func (e NormalEstimator) Accept(s EstimatorStats, itemCost int) bool {
 	if math.IsNaN(s.StdDev) {
 		return true
 	}
-	sz64 := float64(itemCost)
+	ct64 := float64(itemCost)
 	sdThresh := e.Threshold * s.StdDev
-	return s.Mean-sdThresh <= sz64 && sz64 <= s.Mean+sdThresh
+	return s.Mean-sdThresh <= ct64 && ct64 <= s.Mean+sdThresh
 }
 
 // AdaptivePool uses an [ItemProvider] to more effectively use an internal
