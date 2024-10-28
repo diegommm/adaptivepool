@@ -16,7 +16,7 @@ Example usage of AdaptivePool:
 var pool = adaptivepool.New(
     adaptivepool.BytesBufferProvider{},
     adaptivepool.NormalEstimator{
-        Threshold: 2, // reuse buffer if its Len is in Mean ± 2 * StdDev
+        Threshold: 2, // reuse buffer if its Cap is in Mean ± 2 * StdDev
         MinCost: 512, // minimum cost of newly created items
     },
     500, // bias towards the latest 500 elements to increase adaptability
@@ -42,7 +42,7 @@ Example usage of `ReaderBufferer`:
 func bufferAndClose(next http.Handler) http.Handler {
     bodiesPool := adaptivepool.NewReaderBufferer(
         adaptivepool.NormalEstimator{
-            Threshold: 2, // reuse buffer if its Len is in Mean ± 2 * StdDev
+            Threshold: 2, // reuse buffer if its Cap is in Mean ± 2 * StdDev
             MinCost: 512, // minimum cost of newly created items
         },
         500, // bias towards the latest 500 elements to increase adaptability
